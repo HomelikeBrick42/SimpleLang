@@ -1,0 +1,18 @@
+#builtin("Unit")
+struct Unit {}
+
+#builtin("I32")
+type I32
+
+#builtin("Runtime")
+type Runtime
+
+#builtin("print_i32")
+fn print_i32(value: I32, runtime: Runtime)
+
+fn main(runtime: Runtime) -> Unit {
+    print_i32(5, runtime)
+    print_i32(10, runtime)
+
+    Unit {}
+}
