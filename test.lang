@@ -10,7 +10,7 @@ type Runtime
 #builtin("print_i32")
 fn print_i32(value: I32, runtime: Runtime)
 
-fn main(runtime: Runtime) -> Unit {
+fn main(runtime: Runtime) {
     print_i32(5, runtime)
     print_i32(10, runtime)
 
