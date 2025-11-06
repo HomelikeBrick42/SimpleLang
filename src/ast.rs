@@ -20,7 +20,7 @@ pub enum ItemKind {
     Function {
         name: InternedStr,
         parameters: Box<[FunctionParameter]>,
-        return_type: Option<Box<Type>>,
+        return_type: Box<Type>,
         body: FunctionBody,
     },
 }

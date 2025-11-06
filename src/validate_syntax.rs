@@ -113,7 +113,7 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                     };
                     name
                 },
-                typ: if let Some((location, builtin_name)) = builtin_attribute {
+                typ: Box::new(if let Some((location, builtin_name)) = builtin_attribute {
                     if let Some(typ) = typ {
                         return Err(SyntaxTreeValidationError {
                             location: typ.equals_token.location,
@@ -123,15 +123,15 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                     }
 
                     match builtin_name.as_str() {
-                        "I32" => Box::new(ast::Type {
+                        "I32" => ast::Type {
                             location,
                             kind: ast::TypeKind::Builtin(ast::BuiltinType::I32),
-                        }),
+                        },
 
-                        "Runtime" => Box::new(ast::Type {
+                        "Runtime" => ast::Type {
                             location,
                             kind: ast::TypeKind::Builtin(ast::BuiltinType::Runtime),
-                        }),
+                        },
 
                         _ => {
                             return Err(SyntaxTreeValidationError {
@@ -147,8 +147,8 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                             kind: SyntaxTreeValidationErrorKind::TypeAnnotationMustHaveType,
                         });
                     };
-                    Box::new(validate_type(&typ.typ)?)
-                },
+                    validate_type(&typ.typ)?
+                }),
             },
 
             st::ItemKind::Function {
@@ -158,7 +158,7 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                     st::FunctionParameters {
                         open_parenthesis_token: _,
                         ref parameters,
-                        close_parenthesis_token: _,
+                        ref close_parenthesis_token,
                     },
                 ref return_type,
                 ref body,
@@ -190,10 +190,14 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                         },
                     )
                     .collect::<Result<Box<[_]>, _>>()?,
-                return_type: return_type
-                    .as_ref()
-                    .map(|return_type| Ok(Box::new(validate_type(&return_type.typ)?)))
-                    .transpose()?,
+                return_type: Box::new(if let Some(return_type) = return_type {
+                    validate_type(&return_type.typ)?
+                } else {
+                    ast::Type {
+                        location: close_parenthesis_token.location,
+                        kind: ast::TypeKind::Builtin(ast::BuiltinType::Unit),
+                    }
+                }),
                 body: if let Some((location, builtin_name)) = builtin_attribute {
                     if let Some(body) = body {
                         return Err(SyntaxTreeValidationError {
@@ -284,20 +288,24 @@ pub fn validate_expression(
                     last_expression,
                 }
             }
+
             st::ExpressionKind::Integer { ref integer_token } => ast::ExpressionKind::Integer({
                 let TokenKind::Integer(value) = integer_token.kind else {
                     unreachable!("{integer_token:?}")
                 };
                 value
             }),
+
             st::ExpressionKind::Path(ref path) => {
                 ast::ExpressionKind::Path(Box::new(validate_path(path)?))
             }
+
             st::ExpressionKind::ParenthesizedExpression {
                 open_parenthesis_token: _,
                 ref expression,
                 close_parenthesis_token: _,
             } => return validate_expression(expression),
+
             st::ExpressionKind::Call {
                 ref operand,
                 arguments:
