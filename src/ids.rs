@@ -27,7 +27,7 @@ impl<T> Id<T> {
 impl<T> Debug for Id<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Id")
-            .field("type", &std::any::type_name::<T>())
+            .field("id_type", &std::any::type_name::<T>())
             .field("id", &self.0)
             .finish()
     }
@@ -139,7 +139,72 @@ impl<T: Debug> Debug for IdMap<T> {
         }
 
         f.debug_struct("IdMap")
-            .field("type", &core::any::type_name::<T>())
+            .field("id_type", &core::any::type_name::<T>())
+            .field("items", &Items { items: &self.items })
+            .finish()
+    }
+}
+
+pub struct IdSecondaryMap<T, U> {
+    items: FxHashMap<Id<T>, U>,
+}
+
+impl<T, U> IdSecondaryMap<T, U> {
+    pub fn new() -> Self {
+        Self {
+            items: FxHashMap::default(),
+        }
+    }
+
+    pub fn insert_new(&mut self, value: U) -> Id<T> {
+        self.insert_new_with(|_| value)
+    }
+
+    pub fn insert_new_with(&mut self, f: impl FnOnce(Id<T>) -> U) -> Id<T> {
+        let id = Id::next();
+        self.insert(id, f(id));
+        id
+    }
+
+    pub fn insert(&mut self, id: Id<T>, value: U) -> Option<U> {
+        self.items.insert(id, value)
+    }
+
+    pub fn remove(&mut self, id: Id<T>) -> Option<U> {
+        self.items.remove(&id)
+    }
+
+    pub fn get(&self, id: Id<T>) -> Option<&U> {
+        self.items.get(&id)
+    }
+
+    pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut U> {
+        self.items.get_mut(&id)
+    }
+}
+
+impl<T, U> Default for IdSecondaryMap<T, U> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, U: Debug> Debug for IdSecondaryMap<T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct Items<'a, T, U: Debug> {
+            items: &'a FxHashMap<Id<T>, U>,
+        }
+
+        impl<T, U: Debug> Debug for Items<'_, T, U> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_map()
+                    .entries(self.items.iter().map(|(id, value)| (id.0, value)))
+                    .finish()
+            }
+        }
+
+        f.debug_struct("IdSecondaryMap")
+            .field("id_type", &core::any::type_name::<T>())
             .field("items", &Items { items: &self.items })
             .finish()
     }

@@ -27,7 +27,7 @@ fn main() {
     println!("{global_names:#?}");
     if !errors.is_empty() {
         for error in errors {
-            println!("{error}");
+            eprintln!("{error}");
         }
         std::process::exit(1)
     }
