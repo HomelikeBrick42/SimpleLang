@@ -1,26 +1,36 @@
-use simple_lang::{parser::parse_file, validate_syntax::validate_item};
+use simple_lang::{
+    parsing::parse_file,
+    typing::{TypingResult, type_items},
+    validating::validate_items,
+};
 
 fn main() {
     let filepath = "test.lang";
-    let source = std::fs::read_to_string(filepath).unwrap_or_else(|error| {
-        eprintln!("Failed to read '{filepath}': {error:?}");
-        std::process::exit(1)
-    });
+    let source = std::fs::read_to_string(filepath).unwrap_or_else(print_error_and_exit);
 
-    let syntax_tree = parse_file(filepath.into(), &source).unwrap_or_else(|error| {
-        eprintln!("{error}");
-        std::process::exit(1)
-    });
+    let syntax_items = parse_file(filepath.into(), &source).unwrap_or_else(print_error_and_exit);
     drop(source);
 
-    let asts = syntax_tree
-        .into_iter()
-        .map(|item| validate_item(&item))
-        .collect::<Result<Box<[_]>, _>>()
-        .unwrap_or_else(|error| {
-            eprintln!("{error}");
-            std::process::exit(1)
-        });
+    let validated_items = validate_items(&syntax_items).unwrap_or_else(print_error_and_exit);
+    drop(syntax_items);
 
-    println!("{asts:#?}");
+    let TypingResult {
+        types,
+        functions,
+        global_names,
+        errors,
+    } = type_items(&validated_items);
+    drop(validated_items);
+
+    println!("{types:#?}");
+    println!("{functions:#?}");
+    println!("{global_names:#?}");
+    for error in errors {
+        println!("{error}");
+    }
+}
+
+fn print_error_and_exit<T: std::fmt::Display, U>(error: T) -> U {
+    eprintln!("{error}");
+    std::process::exit(1)
 }

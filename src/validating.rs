@@ -34,6 +34,10 @@ pub enum SyntaxTreeValidationErrorKind {
     BuiltinFunctionMustNotHaveBody,
 }
 
+pub fn validate_items(items: &[st::Item]) -> Result<Box<[ast::Item]>, SyntaxTreeValidationError> {
+    items.iter().map(validate_item).collect()
+}
+
 pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationError> {
     let mut builtin_attribute = None;
     for attribute in &item.attributes {
@@ -72,7 +76,20 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                         close_brace_token: _,
                     },
             } => ast::ItemKind::Struct {
-                builtin_name: builtin_attribute.map(|(_, name)| name),
+                builtin: if let Some((location, builtin_name)) = builtin_attribute {
+                    Some(match builtin_name.as_str() {
+                        "Unit" => ast::BuiltinStruct::Unit,
+
+                        _ => {
+                            return Err(SyntaxTreeValidationError {
+                                location,
+                                kind: SyntaxTreeValidationErrorKind::UnknownBuiltin(builtin_name),
+                            });
+                        }
+                    })
+                } else {
+                    None
+                },
                 name: {
                     let TokenKind::Name(name) = name_token.kind else {
                         unreachable!("{name_token:?}")

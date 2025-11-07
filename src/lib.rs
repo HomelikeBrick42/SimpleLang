@@ -1,6 +1,9 @@
 pub mod ast;
+pub mod ids;
 pub mod interning;
 pub mod lexing;
-pub mod parser;
+pub mod parsing;
 pub mod syntax_tree;
-pub mod validate_syntax;
+pub mod typed_tree;
+pub mod typing;
+pub mod validating;

@@ -9,7 +9,7 @@ pub struct Item {
 #[derive(Debug)]
 pub enum ItemKind {
     Struct {
-        builtin_name: Option<InternedStr>,
+        builtin: Option<BuiltinStruct>,
         name: InternedStr,
         members: Box<[StructMember]>,
     },
@@ -23,6 +23,11 @@ pub enum ItemKind {
         return_type: Box<Type>,
         body: FunctionBody,
     },
+}
+
+#[derive(Debug)]
+pub enum BuiltinStruct {
+    Unit,
 }
 
 #[derive(Debug)]
