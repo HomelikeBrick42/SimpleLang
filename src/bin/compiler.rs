@@ -25,8 +25,11 @@ fn main() {
     println!("{types:#?}");
     println!("{functions:#?}");
     println!("{global_names:#?}");
-    for error in errors {
-        println!("{error}");
+    if !errors.is_empty() {
+        for error in errors {
+            println!("{error}");
+        }
+        std::process::exit(1)
     }
 }
 
