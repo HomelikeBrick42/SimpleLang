@@ -27,6 +27,8 @@ pub enum TypingErrorKind {
     },
     #[display("Unknown name '{name}'")]
     UnknownName { name: InternedStr },
+    #[display("Unknown label '{label}")]
+    UnknownLabel { label: InternedStr },
     #[display("Expected a value but got thing declared at {declared_location}")]
     ExpectedValue { declared_location: SourceLocation },
     #[display("Expected a {expected:?} but got {got:?}")]
@@ -626,14 +628,15 @@ impl<'ast> Typer<'ast> {
                 ref last_expression,
             } => {
                 let mut names = names.clone();
-                let statements = self.statements(statements.iter(), &mut names, variables)?;
-                let last_expression =
-                    Box::new(self.expression(last_expression, &names, variables)?);
 
                 let label_id = Id::new();
                 if let Some(label) = label {
                     names.labels.insert(label, label_id);
                 }
+
+                let statements = self.statements(statements.iter(), &mut names, variables)?;
+                let last_expression =
+                    Box::new(self.expression(last_expression, &names, variables)?);
 
                 tt::Expression {
                     location: expression.location,
@@ -871,6 +874,43 @@ impl<'ast> Typer<'ast> {
                     kind: tt::ExpressionKind::Match { scruitnee, arms },
                 }
             }
+
+            ast::ExpressionKind::Break { label, ref value } => tt::Expression {
+                location: expression.location,
+                typ: self
+                    .never_type
+                    .expect("the Never type should have already been defined"),
+                kind: tt::ExpressionKind::Break {
+                    label: match names.labels.get(&label) {
+                        Some(&id) => id,
+                        None => {
+                            return Err(TypingError {
+                                location: expression.location,
+                                kind: TypingErrorKind::UnknownLabel { label },
+                            });
+                        }
+                    },
+                    value: Box::new(self.expression(value, names, variables)?),
+                },
+            },
+
+            ast::ExpressionKind::Continue { label } => tt::Expression {
+                location: expression.location,
+                typ: self
+                    .never_type
+                    .expect("the Never type should have already been defined"),
+                kind: tt::ExpressionKind::Continue {
+                    label: match names.labels.get(&label) {
+                        Some(&id) => id,
+                        None => {
+                            return Err(TypingError {
+                                location: expression.location,
+                                kind: TypingErrorKind::UnknownLabel { label },
+                            });
+                        }
+                    },
+                },
+            },
         })
     }
 

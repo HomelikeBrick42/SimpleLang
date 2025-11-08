@@ -173,6 +173,15 @@ pub enum ExpressionKind {
         then_body: Box<Expression>,
         else_body: Option<Box<Else>>,
     },
+    Break {
+        break_token: Token,
+        lifetime_token: Token,
+        value: Option<Box<Expression>>,
+    },
+    Continue {
+        break_token: Token,
+        lifetime_token: Token,
+    },
 }
 
 #[derive(Debug)]

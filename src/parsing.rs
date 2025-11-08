@@ -323,6 +323,23 @@ pub fn parse_statement(lexer: &mut Lexer) -> Result<Statement, ParsingError> {
     })
 }
 
+fn could_be_expression_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::OpenBrace
+            | TokenKind::OpenParenthesis
+            | TokenKind::Integer(_)
+            | TokenKind::Name(_)
+            | TokenKind::Lifetime(_)
+            | TokenKind::Discard
+            | TokenKind::LetKeyword
+            | TokenKind::IfKeyword
+            | TokenKind::MatchKeyword
+            | TokenKind::BreakKeyword
+            | TokenKind::ContinueKeyword
+    )
+}
+
 pub fn parse_expression(
     lexer: &mut Lexer,
     postfix_brace_allowed: bool,
@@ -336,7 +353,8 @@ pub fn parse_expression(
         None
     };
 
-    let mut expression = match lexer.next_token()? {
+    let first_token = lexer.next_token()?;
+    let mut expression = match first_token.clone() {
         open_brace_token @ Token {
             location,
             kind: TokenKind::OpenBrace,
@@ -491,6 +509,25 @@ pub fn parse_expression(
             },
         },
 
+        break_token @ Token {
+            location,
+            kind: TokenKind::BreakKeyword,
+        } => Expression {
+            label,
+            location,
+            kind: ExpressionKind::Break {
+                break_token,
+                lifetime_token: expect!(lexer, TokenKind::Lifetime(_))?,
+                value: if peek!(lexer, _)
+                    .is_some_and(|token| could_be_expression_start(&token.kind))
+                {
+                    Some(Box::new(parse_expression(lexer, postfix_brace_allowed)?))
+                } else {
+                    None
+                },
+            },
+        },
+
         token => {
             return Err(ParsingError {
                 location: token.location,
@@ -498,6 +535,10 @@ pub fn parse_expression(
             });
         }
     };
+    debug_assert!(
+        could_be_expression_start(&first_token.kind),
+        "{first_token}"
+    );
 
     loop {
         expression = match lexer.peek_token().ok() {

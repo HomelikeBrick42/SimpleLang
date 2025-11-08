@@ -92,6 +92,13 @@ pub enum ExpressionKind {
         scruitnee: Box<Expression>,
         arms: Box<[MatchArm]>,
     },
+    Break {
+        label: Id<Label>,
+        value: Box<Expression>,
+    },
+    Continue {
+        label: Id<Label>,
+    },
 }
 
 #[derive(Debug)]

@@ -83,4 +83,17 @@ fn more_bool_testing(cond: Bool) -> I32 {
 }
 
 fn label_testing() 'return: {
+    break 'return
+
+    // this is to just make it type check, can be removed in
+    // the future when type inference has been added
+    {}
+}
+
+fn label_testing2() -> I32 'return: {
+    break 'return 5
+
+    // this is to just make it type check, can be removed in
+    // the future when type inference has been added
+    0
 }

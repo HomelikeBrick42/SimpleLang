@@ -555,6 +555,36 @@ pub fn validate_expression(
                 ]),
             },
 
+            st::ExpressionKind::Break {
+                ref break_token,
+                ref lifetime_token,
+                ref value,
+            } => ast::ExpressionKind::Break {
+                label: {
+                    let TokenKind::Lifetime(name) = lifetime_token.kind else {
+                        unreachable!("{lifetime_token:?}")
+                    };
+                    name
+                },
+                value: if let Some(value) = value {
+                    Box::new(validate_expression(value)?)
+                } else {
+                    Box::new(unit_expression(break_token.location))
+                },
+            },
+
+            st::ExpressionKind::Continue {
+                break_token: _,
+                ref lifetime_token,
+            } => ast::ExpressionKind::Continue {
+                label: {
+                    let TokenKind::Lifetime(name) = lifetime_token.kind else {
+                        unreachable!("{lifetime_token:?}")
+                    };
+                    name
+                },
+            },
+
             st::ExpressionKind::Discard { .. } | st::ExpressionKind::Let { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
@@ -609,7 +639,9 @@ pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTre
             | st::ExpressionKind::MemberAccess { .. }
             | st::ExpressionKind::Let { .. }
             | st::ExpressionKind::Match { .. }
-            | st::ExpressionKind::If { .. } => {
+            | st::ExpressionKind::If { .. }
+            | st::ExpressionKind::Break { .. }
+            | st::ExpressionKind::Continue { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedType,
@@ -717,7 +749,9 @@ pub fn validate_pattern(
             st::ExpressionKind::Block { .. }
             | st::ExpressionKind::Call { .. }
             | st::ExpressionKind::Match { .. }
-            | st::ExpressionKind::If { .. } => {
+            | st::ExpressionKind::If { .. }
+            | st::ExpressionKind::Break { .. }
+            | st::ExpressionKind::Continue { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: pattern.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedPattern,
