@@ -7,12 +7,13 @@ type I32
 #builtin("Runtime")
 type Runtime
 
-#builtin("print_i32")
-fn print_i32(value: I32, runtime: Runtime)
-
 fn main(runtime: Runtime) {
     print_i32(5, runtime)
     print_i32(10, runtime)
 
     Unit {}
 }
+
+// below to prove that out-of-order declarations work
+#builtin("print_i32")
+fn print_i32(value: I32, runtime: Runtime)

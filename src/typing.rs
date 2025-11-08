@@ -7,7 +7,6 @@ use crate::{
 };
 use derive_more::Display;
 use rustc_hash::{FxBuildHasher, FxHashMap};
-use std::{collections::hash_map::Entry, marker::PhantomData};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
@@ -49,6 +48,8 @@ pub enum TypingErrorKind {
     ExpectedStructTypeButGot { got: Id<tt::Type> },
     #[display("Expected a type but got thing declared at {declared_location}")]
     ExpectedType { declared_location: SourceLocation },
+    #[display("Found a cyclic dependency that was started at {resolving_location}")]
+    CyclicDependency { resolving_location: SourceLocation },
 }
 
 #[derive(Debug)]
@@ -67,40 +68,51 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         i32_type: None,
         runtime_type: None,
 
-        _ast: PhantomData,
+        bindings: IdMap::new(),
     };
     let mut global_names = FxHashMap::default();
     let mut errors = vec![];
 
-    for item in items {
-        match typer.item(item, &mut global_names) {
-            Ok(()) => {}
-            Err(error) => errors.push(error),
-        }
+    if let Err(error) = typer.handle_items(items.iter(), &mut global_names) {
+        errors.push(error);
     }
 
     TypingResult {
         types: typer.types,
         functions: typer.functions,
-        global_names: global_names
+        global_names: if errors.is_empty() {
+            global_names
             .into_iter()
             .map(|(name, binding)| {
                 (
                     name,
                     GlobalBinding {
-                        location: binding.location,
-                        kind: match binding.kind {
-                            BindingKind::Type(id) => GlobalBindingKind::Type(id),
-                            BindingKind::Function(id) => GlobalBindingKind::Function(id),
+                        location: typer.bindings[binding].location,
+                        kind: match typer.bindings[binding].kind {
+                            BindingKind::UnresolvedItem { item, names: _ } => {
+                                unreachable!("all bindings should have been resolved, but {item:?} wasnt")
+                            }
 
-                            BindingKind::Variable(id) => {
-                                unreachable!("variable bindings should not be in the global scope, but {id:?} was")
+                            BindingKind::ResolvingItem { resolving_location } => {
+                                unreachable!("global binding was started resolving at {resolving_location} but never finished")
+                            }
+
+                            BindingKind::Resolved(ref resolved_binding) => match resolved_binding.kind {
+                                ResolvedBindingKind::Type(id) => GlobalBindingKind::Type(id),
+                                ResolvedBindingKind::Function(id) => GlobalBindingKind::Function(id),
+
+                                ResolvedBindingKind::Variable(id) => {
+                                    unreachable!("variable bindings should not be in the global scope, but {id:?} was")
+                                },
                             },
                         },
                     },
                 )
             })
-            .collect(),
+            .collect()
+        } else {
+            FxHashMap::default()
+        },
         errors,
     }
 }
@@ -118,16 +130,21 @@ pub enum GlobalBindingKind {
 }
 
 #[derive(Debug, Clone)]
-struct Binding {
+struct Binding<'ast> {
     pub location: SourceLocation,
-    pub kind: BindingKind,
+    pub kind: BindingKind<'ast>,
 }
 
 #[derive(Debug, Clone)]
-enum BindingKind {
-    Type(Id<tt::Type>),
-    Function(Id<tt::Function>),
-    Variable(Id<tt::Variable>),
+enum BindingKind<'ast> {
+    UnresolvedItem {
+        item: &'ast ast::Item,
+        names: Names<'ast>,
+    },
+    ResolvingItem {
+        resolving_location: SourceLocation,
+    },
+    Resolved(ResolvedBinding),
 }
 
 #[derive(Debug, Clone)]
@@ -150,19 +167,81 @@ struct Typer<'ast> {
     i32_type: Option<Id<tt::Type>>,
     runtime_type: Option<Id<tt::Type>>,
 
-    _ast: PhantomData<&'ast ()>,
+    bindings: IdMap<Binding<'ast>>,
 }
 
+type Names<'ast> = FxHashMap<InternedStr, Id<Binding<'ast>>>;
+
 impl<'ast> Typer<'ast> {
+    fn handle_items(
+        &mut self,
+        items: impl Iterator<Item = &'ast ast::Item>,
+        names: &mut Names<'ast>,
+    ) -> Result<(), TypingError> {
+        let mut inserted_items = vec![];
+        for item in items {
+            let name = match item.kind {
+                ast::ItemKind::Struct { name, .. } => name,
+                ast::ItemKind::Type { name, .. } => name,
+                ast::ItemKind::Function { name, .. } => name,
+            };
+
+            let id = self.bindings.insert(Binding {
+                location: item.location,
+                kind: BindingKind::UnresolvedItem {
+                    item,
+                    names: FxHashMap::default(),
+                },
+            });
+            names.insert(name, id);
+            inserted_items.push((id, item));
+        }
+
+        for &(id, _) in &inserted_items {
+            match &mut self.bindings[id].kind {
+                BindingKind::UnresolvedItem {
+                    item: _,
+                    names: binding_names,
+                } => *binding_names = names.clone(),
+
+                _ => unreachable!("they were just set to unresolved item"),
+            }
+        }
+
+        for (id, item) in inserted_items {
+            if let BindingKind::UnresolvedItem {
+                item: binding_item,
+                ref mut names,
+            } = self.bindings[id].kind
+            {
+                assert!(core::ptr::eq(item, binding_item));
+
+                let mut names = std::mem::take(names);
+                self.bindings[id].kind = BindingKind::ResolvingItem {
+                    resolving_location: item.location,
+                };
+
+                let resolved_binding = self.item(item, &mut names)?;
+                assert!(matches!(
+                    self.bindings[id].kind,
+                    BindingKind::ResolvingItem { .. }
+                ));
+                self.bindings[id].kind = BindingKind::Resolved(resolved_binding);
+            }
+        }
+
+        Ok(())
+    }
+
     fn item(
         &mut self,
         item: &'ast ast::Item,
-        bindings: &mut FxHashMap<InternedStr, Binding>,
-    ) -> Result<(), TypingError> {
-        match item.kind {
+        names: &mut Names<'ast>,
+    ) -> Result<ResolvedBinding, TypingError> {
+        Ok(match item.kind {
             ast::ItemKind::Struct {
                 ref builtin,
-                name,
+                name: _,
                 ref members,
             } => {
                 let members = {
@@ -189,7 +268,7 @@ impl<'ast> Typer<'ast> {
                                 Ok(tt::StructMember {
                                     location,
                                     name,
-                                    typ: self.typ(typ, bindings)?,
+                                    typ: self.typ(typ, names)?,
                                 })
                             },
                         )
@@ -213,195 +292,160 @@ impl<'ast> Typer<'ast> {
                     }
                 }
 
-                match bindings.entry(name) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(Binding {
-                            location: item.location,
-                            kind: BindingKind::Type(id),
-                        });
-                        Ok(())
-                    }
-
-                    Entry::Occupied(entry) => Err(TypingError {
-                        location: item.location,
-                        kind: TypingErrorKind::NameAlreadyDeclared {
-                            name,
-                            defined_location: entry.get().location,
-                        },
-                    }),
+                ResolvedBinding {
+                    location: item.location,
+                    kind: ResolvedBindingKind::Type(id),
                 }
             }
 
-            ast::ItemKind::Type { name, ref typ } => {
-                let typ = self.typ(typ, bindings)?;
-                match bindings.entry(name) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(Binding {
-                            location: item.location,
-                            kind: BindingKind::Type(typ),
-                        });
-                        Ok(())
-                    }
-
-                    Entry::Occupied(entry) => Err(TypingError {
-                        location: item.location,
-                        kind: TypingErrorKind::NameAlreadyDeclared {
-                            name,
-                            defined_location: entry.get().location,
-                        },
-                    }),
+            ast::ItemKind::Type { name: _, ref typ } => {
+                let id = self.typ(typ, names)?;
+                ResolvedBinding {
+                    location: item.location,
+                    kind: ResolvedBindingKind::Type(id),
                 }
             }
 
             ast::ItemKind::Function {
-                name,
+                name: _,
                 ref parameters,
                 ref return_type,
                 ref body,
             } => {
-                let id = {
-                    let mut local_bindings = bindings
-                        .iter()
-                        .filter_map(|(&name, binding)| {
-                            Some((
-                                name,
-                                match binding.kind {
-                                    BindingKind::Type(id) => Binding {
-                                        kind: BindingKind::Type(id),
-                                        ..*binding
-                                    },
+                let mut local_names =
+                    names
+                        .clone()
+                        .into_iter()
+                        .filter(|&(_, binding)| match self.bindings[binding].kind {
+                            BindingKind::UnresolvedItem { .. }
+                            | BindingKind::ResolvingItem { .. } => true,
 
-                                    BindingKind::Function(id) => Binding {
-                                        kind: BindingKind::Function(id),
-                                        ..*binding
-                                    },
+                            BindingKind::Resolved(ref resolved_binding) => {
+                                match resolved_binding.kind {
+                                    ResolvedBindingKind::Type(_)
+                                    | ResolvedBindingKind::Function(_) => true,
 
-                                    BindingKind::Variable(_) => return None,
-                                },
-                            ))
-                        })
-                        .collect::<FxHashMap<InternedStr, Binding>>();
-
-                    let mut parameter_variables = Vec::with_capacity(parameters.len());
-
-                    let mut variables = IdMap::new();
-                    let parameter_types = parameters
-                        .iter()
-                        .map(
-                            |&ast::FunctionParameter {
-                                 location,
-                                 name,
-                                 ref typ,
-                             }| {
-                                let typ = self.typ(typ, bindings)?;
-                                let variable = variables.insert(tt::Variable {
-                                    location,
-                                    name: Some(name),
-                                    typ,
-                                });
-
-                                parameter_variables.push(variable);
-
-                                match local_bindings.entry(name) {
-                                    Entry::Vacant(entry) => {
-                                        entry.insert(Binding {
-                                            location: item.location,
-                                            kind: BindingKind::Variable(variable),
-                                        });
-                                        Ok(typ)
-                                    }
-
-                                    Entry::Occupied(entry) => Err(TypingError {
-                                        location: item.location,
-                                        kind: TypingErrorKind::NameAlreadyDeclared {
-                                            name,
-                                            defined_location: entry.get().location,
-                                        },
-                                    }),
+                                    ResolvedBindingKind::Variable(_) => false,
                                 }
-                            },
-                        )
-                        .collect::<Result<Box<[_]>, _>>()?;
+                            }
+                        })
+                        .collect::<Names<'ast>>();
 
-                    let return_type = self.typ(return_type, bindings)?;
+                let mut parameter_variables = Vec::with_capacity(parameters.len());
 
-                    let body = match body {
-                        ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
-                            expression: Box::new(self.expression(
-                                expression,
-                                &mut local_bindings,
-                                &mut variables,
-                            )?),
-                            variables,
-                            parameters: parameter_variables.into_boxed_slice(),
+                let mut variables = IdMap::new();
+                let parameter_types = parameters
+                    .iter()
+                    .map(
+                        |&ast::FunctionParameter {
+                             location,
+                             name,
+                             ref typ,
+                         }| {
+                            let typ = self.typ(typ, names)?;
+                            let variable = variables.insert(tt::Variable {
+                                location,
+                                name: Some(name),
+                                typ,
+                            });
+
+                            parameter_variables.push(variable);
+
+                            local_names.insert(
+                                name,
+                                self.bindings.insert(Binding {
+                                    location,
+                                    kind: BindingKind::Resolved(ResolvedBinding {
+                                        location,
+                                        kind: ResolvedBindingKind::Variable(variable),
+                                    }),
+                                }),
+                            );
+
+                            Ok(typ)
                         },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?;
 
-                        ast::FunctionBody::Builtin(builtin_function) => {
-                            tt::FunctionBody::Builtin(match *builtin_function {
-                                ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
-                            })
-                        }
-                    };
+                let return_type = self.typ(return_type, names)?;
 
-                    self.functions.insert_with(|id| tt::Function {
-                        location: item.location,
-                        parameter_types,
-                        return_type,
-                        typ: self.types.insert(tt::Type {
-                            location: item.location,
-                            kind: tt::TypeKind::FunctionItem(id),
-                        }),
-                        body,
-                    })
+                let body = match body {
+                    ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
+                        expression: Box::new(self.expression(
+                            expression,
+                            &mut local_names,
+                            &mut variables,
+                        )?),
+                        variables,
+                        parameters: parameter_variables.into_boxed_slice(),
+                    },
+
+                    ast::FunctionBody::Builtin(builtin_function) => {
+                        tt::FunctionBody::Builtin(match *builtin_function {
+                            ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
+                        })
+                    }
                 };
 
-                match bindings.entry(name) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(Binding {
-                            location: item.location,
-                            kind: BindingKind::Function(id),
-                        });
-                        Ok(())
-                    }
-
-                    Entry::Occupied(entry) => Err(TypingError {
+                let id = self.functions.insert_with(|id| tt::Function {
+                    location: item.location,
+                    parameter_types,
+                    return_type,
+                    typ: self.types.insert(tt::Type {
                         location: item.location,
-                        kind: TypingErrorKind::NameAlreadyDeclared {
-                            name,
-                            defined_location: entry.get().location,
-                        },
+                        kind: tt::TypeKind::FunctionItem(id),
                     }),
+                    body,
+                });
+
+                ResolvedBinding {
+                    location: item.location,
+                    kind: ResolvedBindingKind::Function(id),
                 }
             }
-        }
+        })
     }
 
-    fn statement(
+    fn statements(
         &mut self,
-        statement: &'ast ast::Statement,
-        bindings: &mut FxHashMap<InternedStr, Binding>,
+        statements: impl Iterator<Item = &'ast ast::Statement> + Clone,
+        names: &mut Names<'ast>,
         variables: &mut IdMap<tt::Variable>,
-    ) -> Result<Option<tt::Statement>, TypingError> {
-        Ok(match statement.kind {
-            ast::StatementKind::Item(ref item) => {
-                self.item(item, bindings)?;
-                None
-            }
+    ) -> Result<Box<[tt::Statement]>, TypingError> {
+        self.handle_items(
+            statements
+                .clone()
+                .filter_map(|statement| match statement.kind {
+                    ast::StatementKind::Item(ref item) => Some(&**item),
+                    _ => None,
+                }),
+            names,
+        )?;
 
-            ast::StatementKind::Expression(ref expression) => Some(tt::Statement::Expression(
-                Box::new(self.expression(expression, bindings, variables)?),
-            )),
-        })
+        statements
+            .map(|statement| {
+                Ok(match statement.kind {
+                    ast::StatementKind::Item(_) => None,
+
+                    ast::StatementKind::Expression(ref expression) => {
+                        Some(tt::Statement::Expression(Box::new(
+                            self.expression(expression, names, variables)?,
+                        )))
+                    }
+                })
+            })
+            .filter_map(|result| result.transpose())
+            .collect()
     }
 
     fn expression(
         &mut self,
         expression: &'ast ast::Expression,
-        bindings: &mut FxHashMap<InternedStr, Binding>,
+        names: &mut Names<'ast>,
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<tt::Expression, TypingError> {
         Ok(match expression.kind {
-            ast::ExpressionKind::Path(ref path) => match self.path(path, bindings)? {
+            ast::ExpressionKind::Path(ref path) => match self.path(path, names)? {
                 ResolvedBinding {
                     location: _,
                     kind: ResolvedBindingKind::Function(id),
@@ -443,16 +487,10 @@ impl<'ast> Typer<'ast> {
                 ref statements,
                 ref last_expression,
             } => {
-                let mut bindings = bindings.clone();
-                let statements = statements
-                    .iter()
-                    .filter_map(|statement| {
-                        self.statement(statement, &mut bindings, variables)
-                            .transpose()
-                    })
-                    .collect::<Result<Box<[_]>, _>>()?;
+                let mut names = names.clone();
+                let statements = self.statements(statements.iter(), &mut names, variables)?;
                 let last_expression =
-                    Box::new(self.expression(last_expression, &mut bindings, variables)?);
+                    Box::new(self.expression(last_expression, &mut names, variables)?);
                 tt::Expression {
                     location: expression.location,
                     typ: last_expression.typ,
@@ -467,7 +505,7 @@ impl<'ast> Typer<'ast> {
                 ref operand,
                 ref arguments,
             } => {
-                let operand = Box::new(self.expression(operand, bindings, variables)?);
+                let operand = Box::new(self.expression(operand, names, variables)?);
 
                 let tt::TypeKind::FunctionItem(function) = self.types[operand.typ].kind else {
                     return Err(TypingError {
@@ -493,7 +531,7 @@ impl<'ast> Typer<'ast> {
                     .iter()
                     .zip(parameter_types)
                     .map(|(expression, expected_type)| {
-                        let expression = self.expression(expression, bindings, variables)?;
+                        let expression = self.expression(expression, names, variables)?;
                         self.expect_types(expression.location, expected_type, expression.typ)?;
                         Ok(expression)
                     })
@@ -511,7 +549,7 @@ impl<'ast> Typer<'ast> {
                 ref arguments,
             } => {
                 let typ_location = typ.location;
-                let typ = self.typ(typ, bindings)?;
+                let typ = self.typ(typ, names)?;
                 let tt::TypeKind::Struct { ref members } = self.types[typ].kind else {
                     return Err(TypingError {
                         location: typ_location,
@@ -547,7 +585,7 @@ impl<'ast> Typer<'ast> {
                              name,
                              ref value,
                          }| {
-                            let value = self.expression(value, bindings, variables)?;
+                            let value = self.expression(value, names, variables)?;
 
                             if let Some(&original_location) = initialised_members.get(&name) {
                                 return Err(TypingError {
@@ -597,14 +635,14 @@ impl<'ast> Typer<'ast> {
     fn typ(
         &mut self,
         typ: &'ast ast::Type,
-        bindings: &mut FxHashMap<InternedStr, Binding>,
+        names: &mut Names<'ast>,
     ) -> Result<Id<tt::Type>, TypingError> {
         Ok(match typ.kind {
             ast::TypeKind::Infer => {
                 panic!("{}: type inference is not implemented yet", typ.location)
             }
 
-            ast::TypeKind::Path(ref path) => match self.path(path, bindings)? {
+            ast::TypeKind::Path(ref path) => match self.path(path, names)? {
                 ResolvedBinding {
                     location: _,
                     kind: ResolvedBindingKind::Type(id),
@@ -646,17 +684,37 @@ impl<'ast> Typer<'ast> {
     fn path(
         &mut self,
         path: &'ast ast::Path,
-        bindings: &mut FxHashMap<InternedStr, Binding>,
+        names: &mut Names<'ast>,
     ) -> Result<ResolvedBinding, TypingError> {
-        match bindings.get(&path.name) {
-            Some(binding) => Ok(ResolvedBinding {
-                location: path.location,
-                kind: match binding.kind {
-                    BindingKind::Type(id) => ResolvedBindingKind::Type(id),
-                    BindingKind::Function(id) => ResolvedBindingKind::Function(id),
-                    BindingKind::Variable(id) => ResolvedBindingKind::Variable(id),
-                },
-            }),
+        match names.get(&path.name) {
+            Some(&id) => match self.bindings[id].kind {
+                BindingKind::UnresolvedItem {
+                    item,
+                    ref mut names,
+                } => {
+                    let mut names = std::mem::take(names);
+
+                    self.bindings[id].kind = BindingKind::ResolvingItem {
+                        resolving_location: path.location,
+                    };
+
+                    let resolved_binding = self.item(item, &mut names)?;
+                    assert!(matches!(
+                        self.bindings[id].kind,
+                        BindingKind::ResolvingItem { .. }
+                    ));
+                    self.bindings[id].kind = BindingKind::Resolved(resolved_binding.clone());
+
+                    Ok(resolved_binding)
+                }
+
+                BindingKind::ResolvingItem { resolving_location } => Err(TypingError {
+                    location: path.location,
+                    kind: TypingErrorKind::CyclicDependency { resolving_location },
+                }),
+
+                BindingKind::Resolved(ref resolved_binding) => Ok(resolved_binding.clone()),
+            },
 
             None => Err(TypingError {
                 location: path.location,
