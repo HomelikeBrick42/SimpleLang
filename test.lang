@@ -66,8 +66,8 @@ fn match_testing(b: B) -> A {
 
 fn bool_testing(cond: Bool) -> I32 {
     match cond {
-        Bool { false: Unit {} } => 0,
         Bool { true: Unit {} } => 1,
+        Bool { false: Unit {} } => 0,
     }
 }
 
