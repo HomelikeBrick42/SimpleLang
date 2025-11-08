@@ -11,7 +11,8 @@ use std::{
 pub struct Id<T>(NonZeroUsize, PhantomData<T>);
 
 impl<T> Id<T> {
-    fn next() -> Self {
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         if let Some(id) = NonZeroUsize::new(NEXT_ID.fetch_add(1, Ordering::Relaxed)) {
             Self(id, PhantomData)
@@ -74,7 +75,7 @@ impl<T> IdMap<T> {
     }
 
     pub fn insert_with(&mut self, f: impl FnOnce(Id<T>) -> T) -> Id<T> {
-        let id = Id::next();
+        let id = Id::new();
         self.insert_id(id, f(id));
         id
     }
@@ -161,7 +162,7 @@ impl<T, U> IdSecondaryMap<T, U> {
     }
 
     pub fn insert_new_with(&mut self, f: impl FnOnce(Id<T>) -> U) -> Id<T> {
-        let id = Id::next();
+        let id = Id::new();
         self.insert(id, f(id));
         id
     }
