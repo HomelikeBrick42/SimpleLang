@@ -26,8 +26,8 @@ pub enum TypingErrorKind {
     },
     #[display("Unknown name '{name}'")]
     UnknownName { name: InternedStr },
-    #[display("Expected a value")]
-    ExpectedValue,
+    #[display("Expected a value but got thing declared at {declared_location}")]
+    ExpectedValue { declared_location: SourceLocation },
     #[display("Expected a {expected:?} but got {got:?}")]
     ExpectedTypeButGotType {
         expected: Id<tt::Type>,
@@ -47,15 +47,15 @@ pub enum TypingErrorKind {
     },
     #[display("Expected a struct type but got {got:?}")]
     ExpectedStructTypeButGot { got: Id<tt::Type> },
-    #[display("Expected a type")]
-    ExpectedType,
+    #[display("Expected a type but got thing declared at {declared_location}")]
+    ExpectedType { declared_location: SourceLocation },
 }
 
 #[derive(Debug)]
 pub struct TypingResult {
     pub types: IdMap<tt::Type>,
     pub functions: IdMap<tt::Function>,
-    pub global_names: FxHashMap<InternedStr, Binding>,
+    pub global_names: FxHashMap<InternedStr, GlobalBinding>,
     pub errors: Vec<TypingError>,
 }
 
@@ -80,19 +80,62 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
     TypingResult {
         types: typer.types,
         functions: typer.functions,
-        global_names,
+        global_names: global_names
+            .into_iter()
+            .map(|(name, binding)| {
+                (
+                    name,
+                    GlobalBinding {
+                        location: binding.location,
+                        kind: match binding.kind {
+                            BindingKind::Type(id) => GlobalBindingKind::Type(id),
+                            BindingKind::Function(id) => GlobalBindingKind::Function(id),
+
+                            BindingKind::Variable(id) => {
+                                unreachable!("variable bindings should not be in the global scope, but {id:?} was")
+                            },
+                        },
+                    },
+                )
+            })
+            .collect(),
         errors,
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Binding {
+pub struct GlobalBinding {
+    pub location: SourceLocation,
+    pub kind: GlobalBindingKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum GlobalBindingKind {
+    Type(Id<tt::Type>),
+    Function(Id<tt::Function>),
+}
+
+#[derive(Debug, Clone)]
+struct Binding {
     pub location: SourceLocation,
     pub kind: BindingKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum BindingKind {
+enum BindingKind {
+    Type(Id<tt::Type>),
+    Function(Id<tt::Function>),
+    Variable(Id<tt::Variable>),
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedBinding {
+    pub location: SourceLocation,
+    pub kind: ResolvedBindingKind,
+}
+
+#[derive(Debug, Clone)]
+enum ResolvedBindingKind {
     Type(Id<tt::Type>),
     Function(Id<tt::Function>),
     Variable(Id<tt::Variable>),
@@ -282,7 +325,7 @@ impl Typer {
                         ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
                             expression: Box::new(self.expression(
                                 expression,
-                                &local_bindings,
+                                &mut local_bindings,
                                 &mut variables,
                             )?),
                             variables,
@@ -350,36 +393,36 @@ impl Typer {
     fn expression(
         &mut self,
         expression: &ast::Expression,
-        bindings: &FxHashMap<InternedStr, Binding>,
+        bindings: &mut FxHashMap<InternedStr, Binding>,
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<tt::Expression, TypingError> {
         Ok(match expression.kind {
-            ast::ExpressionKind::Path(ref path) => match bindings.get(&path.name) {
-                Some(name) => match name.kind {
-                    BindingKind::Function(id) => tt::Expression {
-                        location: expression.location,
-                        typ: self.functions[id].typ,
-                        kind: tt::ExpressionKind::Function(id),
-                    },
-
-                    BindingKind::Variable(id) => tt::Expression {
-                        location: expression.location,
-                        typ: variables[id].typ,
-                        kind: tt::ExpressionKind::Variable(id),
-                    },
-
-                    _ => {
-                        return Err(TypingError {
-                            location: expression.location,
-                            kind: TypingErrorKind::ExpectedValue,
-                        });
-                    }
+            ast::ExpressionKind::Path(ref path) => match self.path(path, bindings)? {
+                ResolvedBinding {
+                    location: _,
+                    kind: ResolvedBindingKind::Function(id),
+                } => tt::Expression {
+                    location: expression.location,
+                    typ: self.functions[id].typ,
+                    kind: tt::ExpressionKind::Function(id),
                 },
 
-                None => {
+                ResolvedBinding {
+                    location: _,
+                    kind: ResolvedBindingKind::Variable(id),
+                } => tt::Expression {
+                    location: expression.location,
+                    typ: variables[id].typ,
+                    kind: tt::ExpressionKind::Variable(id),
+                },
+
+                ResolvedBinding {
+                    location: declared_location,
+                    kind: _,
+                } => {
                     return Err(TypingError {
-                        location: expression.location,
-                        kind: TypingErrorKind::UnknownName { name: path.name },
+                        location: path.location,
+                        kind: TypingErrorKind::ExpectedValue { declared_location },
                     });
                 }
             },
@@ -405,7 +448,7 @@ impl Typer {
                     })
                     .collect::<Result<Box<[_]>, _>>()?;
                 let last_expression =
-                    Box::new(self.expression(last_expression, &bindings, variables)?);
+                    Box::new(self.expression(last_expression, &mut bindings, variables)?);
                 tt::Expression {
                     location: expression.location,
                     typ: last_expression.typ,
@@ -550,29 +593,26 @@ impl Typer {
     fn typ(
         &mut self,
         typ: &ast::Type,
-        bindings: &FxHashMap<InternedStr, Binding>,
+        bindings: &mut FxHashMap<InternedStr, Binding>,
     ) -> Result<Id<tt::Type>, TypingError> {
         Ok(match typ.kind {
             ast::TypeKind::Infer => {
                 panic!("{}: type inference is not implemented yet", typ.location)
             }
 
-            ast::TypeKind::Path(ref path) => match bindings.get(&path.name) {
-                Some(name) => match name.kind {
-                    BindingKind::Type(id) => id,
+            ast::TypeKind::Path(ref path) => match self.path(path, bindings)? {
+                ResolvedBinding {
+                    location: _,
+                    kind: ResolvedBindingKind::Type(id),
+                } => id,
 
-                    _ => {
-                        return Err(TypingError {
-                            location: typ.location,
-                            kind: TypingErrorKind::ExpectedType,
-                        });
-                    }
-                },
-
-                None => {
+                ResolvedBinding {
+                    location: declared_location,
+                    kind: _,
+                } => {
                     return Err(TypingError {
-                        location: typ.location,
-                        kind: TypingErrorKind::UnknownName { name: path.name },
+                        location: path.location,
+                        kind: TypingErrorKind::ExpectedType { declared_location },
                     });
                 }
             },
@@ -597,6 +637,28 @@ impl Typer {
                 }),
             },
         })
+    }
+
+    fn path(
+        &mut self,
+        path: &ast::Path,
+        bindings: &mut FxHashMap<InternedStr, Binding>,
+    ) -> Result<ResolvedBinding, TypingError> {
+        match bindings.get(&path.name) {
+            Some(binding) => Ok(ResolvedBinding {
+                location: path.location,
+                kind: match binding.kind {
+                    BindingKind::Type(id) => ResolvedBindingKind::Type(id),
+                    BindingKind::Function(id) => ResolvedBindingKind::Function(id),
+                    BindingKind::Variable(id) => ResolvedBindingKind::Variable(id),
+                },
+            }),
+
+            None => Err(TypingError {
+                location: path.location,
+                kind: TypingErrorKind::UnknownName { name: path.name },
+            }),
+        }
     }
 
     fn expect_types(
