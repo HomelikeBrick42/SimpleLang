@@ -28,7 +28,12 @@ pub enum ItemKind {
     Struct {
         struct_token: Token,
         name_token: Token,
-        members: StructMembers,
+        members: Members,
+    },
+    Enum {
+        enum_token: Token,
+        name_token: Token,
+        members: Members,
     },
     Type {
         type_token: Token,
@@ -45,14 +50,14 @@ pub enum ItemKind {
 }
 
 #[derive(Debug)]
-pub struct StructMembers {
+pub struct Members {
     pub open_brace_token: Token,
-    pub members: Box<[StructMember]>,
+    pub members: Box<[Member]>,
     pub close_brace_token: Token,
 }
 
 #[derive(Debug)]
-pub struct StructMember {
+pub struct Member {
     pub name_token: Token,
     pub colon_token: Token,
     pub typ: Expression,

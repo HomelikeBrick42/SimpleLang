@@ -4,8 +4,8 @@ use crate::{
     syntax_tree::{
         Attribute, AttributeKind, CallArguments, ColonType, ConstructorArgument,
         ConstructorArguments, EqualsType, Expression, ExpressionKind, FunctionParameter,
-        FunctionParameters, FunctionReturnType, Item, ItemKind, MatchArm, MatchBody, Path,
-        Statement, StatementKind, StructMember, StructMembers,
+        FunctionParameters, FunctionReturnType, Item, ItemKind, MatchArm, MatchBody, Member,
+        Members, Path, Statement, StatementKind,
     },
 };
 use derive_more::Display;
@@ -136,7 +136,7 @@ pub fn parse_item(lexer: &mut Lexer) -> Result<Item, ParsingError> {
                             break close_brace_token;
                         }
 
-                        members.push(StructMember {
+                        members.push(Member {
                             name_token: expect!(lexer, TokenKind::Name(_))?,
                             colon_token: expect!(lexer, TokenKind::Colon)?,
                             typ: parse_expression(lexer, true)?,
@@ -148,7 +148,47 @@ pub fn parse_item(lexer: &mut Lexer) -> Result<Item, ParsingError> {
                         expect!(lexer, TokenKind::Comma)?;
                     };
 
-                    StructMembers {
+                    Members {
+                        open_brace_token,
+                        members: members.into_boxed_slice(),
+                        close_brace_token,
+                    }
+                },
+            },
+        },
+
+        enum_token @ Token {
+            location,
+            kind: TokenKind::EnumKeyword,
+        } => Item {
+            attributes,
+            location,
+            kind: ItemKind::Enum {
+                enum_token,
+                name_token: expect!(lexer, TokenKind::Name(_))?,
+
+                members: {
+                    let open_brace_token = expect!(lexer, TokenKind::OpenBrace)?;
+                    let mut members = vec![];
+                    let close_brace_token = loop {
+                        while consume!(lexer, TokenKind::Newline).is_some() {}
+                        if let Some(close_brace_token) = consume!(lexer, TokenKind::CloseBrace) {
+                            break close_brace_token;
+                        }
+
+                        members.push(Member {
+                            name_token: expect!(lexer, TokenKind::Name(_))?,
+                            colon_token: expect!(lexer, TokenKind::Colon)?,
+                            typ: parse_expression(lexer, true)?,
+                        });
+
+                        if let Some(close_brace_token) = consume!(lexer, TokenKind::CloseBrace) {
+                            break close_brace_token;
+                        }
+                        expect!(lexer, TokenKind::Comma)?;
+                    };
+
+                    Members {
                         open_brace_token,
                         members: members.into_boxed_slice(),
                         close_brace_token,

@@ -7,6 +7,12 @@ type I32
 #builtin("Runtime")
 type Runtime
 
+#builtin("Bool")
+enum Bool {
+    false: Unit,
+    true: Unit,
+}
+
 struct Foo {
     member: Unit,
 }
@@ -55,5 +61,12 @@ struct B {
 fn match_testing(b: B) -> A {
     match b {
         B { a: let a: A } => a,
+    }
+}
+
+fn bool_testing(cond: Bool) -> I32 {
+    match cond {
+        Bool { false: Unit {} } => 0,
+        Bool { true: Unit {} } => 1,
     }
 }

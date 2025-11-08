@@ -72,7 +72,7 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                 struct_token: _,
                 ref name_token,
                 members:
-                    st::StructMembers {
+                    st::Members {
                         open_brace_token: _,
                         ref members,
                         close_brace_token: _,
@@ -101,12 +101,65 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                 members: members
                     .iter()
                     .map(
-                        |st::StructMember {
+                        |st::Member {
                              name_token,
                              colon_token: _,
                              typ,
                          }| {
-                            Ok(ast::StructMember {
+                            Ok(ast::Member {
+                                location: name_token.location,
+                                name: {
+                                    let TokenKind::Name(name) = name_token.kind else {
+                                        unreachable!("{name_token:?}")
+                                    };
+                                    name
+                                },
+                                typ: validate_type(typ)?,
+                            })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?,
+            },
+
+            st::ItemKind::Enum {
+                enum_token: _,
+                ref name_token,
+                members:
+                    st::Members {
+                        open_brace_token: _,
+                        ref members,
+                        close_brace_token: _,
+                    },
+            } => ast::ItemKind::Enum {
+                builtin: if let Some((location, builtin_name)) = builtin_attribute {
+                    Some(match builtin_name.as_str() {
+                        "Bool" => ast::BuiltinEnum::Bool,
+
+                        _ => {
+                            return Err(SyntaxTreeValidationError {
+                                location,
+                                kind: SyntaxTreeValidationErrorKind::UnknownBuiltin(builtin_name),
+                            });
+                        }
+                    })
+                } else {
+                    None
+                },
+                name: {
+                    let TokenKind::Name(name) = name_token.kind else {
+                        unreachable!("{name_token:?}")
+                    };
+                    name
+                },
+                members: members
+                    .iter()
+                    .map(
+                        |st::Member {
+                             name_token,
+                             colon_token: _,
+                             typ,
+                         }| {
+                            Ok(ast::Member {
                                 location: name_token.location,
                                 name: {
                                     let TokenKind::Name(name) = name_token.kind else {

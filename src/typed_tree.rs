@@ -42,14 +42,15 @@ pub struct Type {
 
 #[derive(Debug)]
 pub enum TypeKind {
-    Struct { members: Box<[StructMember]> },
+    Struct { members: Box<[Member]> },
+    Enum { members: Box<[Member]> },
     FunctionItem(Id<Function>),
     I32,
     Runtime,
 }
 
 #[derive(Debug)]
-pub struct StructMember {
+pub struct Member {
     pub location: SourceLocation,
     pub name: InternedStr,
     pub typ: Id<Type>,
@@ -83,8 +84,8 @@ pub enum ExpressionKind {
         operand: Box<Expression>,
         arguments: Box<[Expression]>,
     },
-    StructConstructor {
-        arguments: Box<[StructConstructorArgument]>,
+    Constructor {
+        arguments: Box<[ConstructorArgument]>,
     },
     Match {
         scruitnee: Box<Expression>,
@@ -108,7 +109,7 @@ pub enum Constant {
 }
 
 #[derive(Debug)]
-pub struct StructConstructorArgument {
+pub struct ConstructorArgument {
     pub member_index: usize,
     pub value: Expression,
 }
@@ -132,8 +133,8 @@ pub enum PatternKind {
     Discard,
     Place(Place),
     Constant(Constant),
-    StructDeconstructor {
-        arguments: Box<[StructDeconstructorArgument]>,
+    Deconstructor {
+        arguments: Box<[DeconstructorArgument]>,
     },
     Let {
         variable: Id<Variable>,
@@ -141,7 +142,7 @@ pub enum PatternKind {
 }
 
 #[derive(Debug)]
-pub struct StructDeconstructorArgument {
+pub struct DeconstructorArgument {
     pub member_index: usize,
     pub pattern: Pattern,
 }

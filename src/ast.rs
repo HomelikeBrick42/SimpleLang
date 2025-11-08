@@ -11,7 +11,12 @@ pub enum ItemKind {
     Struct {
         builtin: Option<BuiltinStruct>,
         name: InternedStr,
-        members: Box<[StructMember]>,
+        members: Box<[Member]>,
+    },
+    Enum {
+        builtin: Option<BuiltinEnum>,
+        name: InternedStr,
+        members: Box<[Member]>,
     },
     Type {
         name: InternedStr,
@@ -31,7 +36,12 @@ pub enum BuiltinStruct {
 }
 
 #[derive(Debug)]
-pub struct StructMember {
+pub enum BuiltinEnum {
+    Bool,
+}
+
+#[derive(Debug)]
+pub struct Member {
     pub location: SourceLocation,
     pub name: InternedStr,
     pub typ: Type,
