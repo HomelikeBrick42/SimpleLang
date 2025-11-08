@@ -77,10 +77,12 @@ pub enum TokenKind {
     LetKeyword,
     #[display("match keyword")]
     MatchKeyword,
+    #[display("if keyword")]
+    IfKeyword,
+    #[display("else keyword")]
+    ElseKeyword,
     #[display("const keyword")]
     ConstKeyword,
-    #[display("type_of keyword")]
-    TypeOfKeyword,
 
     #[display("{_0}")]
     Integer(u64),
@@ -274,8 +276,9 @@ impl<'source> Lexer<'source> {
                             "type" => TokenKind::TypeKeyword,
                             "let" => TokenKind::LetKeyword,
                             "match" => TokenKind::MatchKeyword,
+                            "if" => TokenKind::IfKeyword,
+                            "else" => TokenKind::ElseKeyword,
                             "const" => TokenKind::ConstKeyword,
-                            "type_of" => TokenKind::TypeOfKeyword,
                             name => TokenKind::Name(name.into()),
                         }
                     }

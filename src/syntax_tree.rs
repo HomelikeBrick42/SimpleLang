@@ -160,6 +160,12 @@ pub enum ExpressionKind {
         scruitnee: Box<Expression>,
         body: MatchBody,
     },
+    If {
+        if_token: Token,
+        condition: Box<Expression>,
+        then_body: Box<Expression>,
+        else_body: Option<Box<Else>>,
+    },
 }
 
 #[derive(Debug)]
@@ -201,4 +207,10 @@ pub struct MatchArm {
     pub pattern: Expression,
     pub fat_right_arrow_token: Token,
     pub value: Expression,
+}
+
+#[derive(Debug)]
+pub struct Else {
+    pub else_token: Token,
+    pub else_block: Expression,
 }

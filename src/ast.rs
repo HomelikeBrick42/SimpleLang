@@ -155,6 +155,7 @@ pub enum BuiltinType {
     Unit,
     I32,
     Runtime,
+    Bool,
 }
 
 #[derive(Debug)]

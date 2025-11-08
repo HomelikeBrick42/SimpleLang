@@ -3,7 +3,7 @@ use crate::{
     lexing::{Lexer, LexerErrorKind, LexingError, SourceLocation, Token, TokenKind},
     syntax_tree::{
         Attribute, AttributeKind, CallArguments, ColonType, ConstructorArgument,
-        ConstructorArguments, EqualsType, Expression, ExpressionKind, FunctionParameter,
+        ConstructorArguments, Else, EqualsType, Expression, ExpressionKind, FunctionParameter,
         FunctionParameters, FunctionReturnType, Item, ItemKind, MatchArm, MatchBody, Member,
         Members, Path, Statement, StatementKind,
     },
@@ -450,6 +450,26 @@ pub fn parse_expression(
                         arms: arms.into_boxed_slice(),
                         close_brace_token,
                     }
+                },
+            },
+        },
+
+        if_token @ Token {
+            location,
+            kind: TokenKind::IfKeyword,
+        } => Expression {
+            location,
+            kind: ExpressionKind::If {
+                if_token,
+                condition: Box::new(parse_expression(lexer, false)?),
+                then_body: Box::new(parse_expression(lexer, true)?),
+                else_body: if let Some(else_token) = consume!(lexer, TokenKind::ElseKeyword) {
+                    Some(Box::new(Else {
+                        else_token,
+                        else_block: parse_expression(lexer, true)?,
+                    }))
+                } else {
+                    None
                 },
             },
         },

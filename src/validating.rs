@@ -352,16 +352,7 @@ pub fn validate_expression(
                     };
                     expression
                 } else {
-                    Box::new(ast::Expression {
-                        location: close_brace_token.location,
-                        kind: ast::ExpressionKind::Constructor {
-                            typ: Box::new(ast::Type {
-                                location: close_brace_token.location,
-                                kind: ast::TypeKind::Builtin(ast::BuiltinType::Unit),
-                            }),
-                            arguments: Box::new([]),
-                        },
-                    })
+                    Box::new(unit_expression(close_brace_token.location))
                 };
 
                 ast::ExpressionKind::Block {
@@ -481,6 +472,70 @@ pub fn validate_expression(
                     .collect::<Result<Box<[_]>, _>>()?,
             },
 
+            st::ExpressionKind::If {
+                ref if_token,
+                ref condition,
+                ref then_body,
+                ref else_body,
+            } => ast::ExpressionKind::Match {
+                scruitnee: Box::new(validate_expression(condition)?),
+                arms: Box::new([
+                    ast::MatchArm {
+                        location: if_token.location,
+                        pattern: ast::Pattern {
+                            location: if_token.location,
+                            kind: ast::PatternKind::Deconstructor {
+                                typ: Box::new(ast::Type {
+                                    location: if_token.location,
+                                    kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
+                                }),
+                                arguments: Box::new([ast::DeconstructorArgument {
+                                    location: if_token.location,
+                                    name: "true".into(),
+                                    pattern: unit_pattern(if_token.location),
+                                }]),
+                            },
+                        },
+                        value: validate_expression(then_body)?,
+                    },
+                    if let Some(else_body) = else_body {
+                        ast::MatchArm {
+                            location: else_body.else_token.location,
+                            pattern: ast::Pattern {
+                                location: else_body.else_token.location,
+                                kind: ast::PatternKind::Deconstructor {
+                                    typ: Box::new(ast::Type {
+                                        location: else_body.else_token.location,
+                                        kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
+                                    }),
+                                    arguments: Box::new([ast::DeconstructorArgument {
+                                        location: else_body.else_token.location,
+                                        name: "false".into(),
+                                        pattern: unit_pattern(else_body.else_token.location),
+                                    }]),
+                                },
+                            },
+                            value: validate_expression(&else_body.else_block)?,
+                        }
+                    } else {
+                        ast::MatchArm {
+                            location: if_token.location,
+                            pattern: ast::Pattern {
+                                location: if_token.location,
+                                kind: ast::PatternKind::Deconstructor {
+                                    typ: Box::new(ast::Type {
+                                        location: if_token.location,
+                                        kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
+                                    }),
+                                    arguments: Box::new([]),
+                                },
+                            },
+                            value: unit_expression(if_token.location),
+                        }
+                    },
+                ]),
+            },
+
             st::ExpressionKind::Discard { .. } | st::ExpressionKind::Let { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
@@ -489,6 +544,32 @@ pub fn validate_expression(
             }
         },
     })
+}
+
+fn unit_expression(location: SourceLocation) -> ast::Expression {
+    ast::Expression {
+        location,
+        kind: ast::ExpressionKind::Constructor {
+            typ: Box::new(ast::Type {
+                location,
+                kind: ast::TypeKind::Builtin(ast::BuiltinType::Unit),
+            }),
+            arguments: Box::new([]),
+        },
+    }
+}
+
+fn unit_pattern(location: SourceLocation) -> ast::Pattern {
+    ast::Pattern {
+        location,
+        kind: ast::PatternKind::Deconstructor {
+            typ: Box::new(ast::Type {
+                location,
+                kind: ast::TypeKind::Builtin(ast::BuiltinType::Unit),
+            }),
+            arguments: Box::new([]),
+        },
+    }
 }
 
 pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTreeValidationError> {
@@ -508,7 +589,8 @@ pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTre
             | st::ExpressionKind::Constructor { .. }
             | st::ExpressionKind::MemberAccess { .. }
             | st::ExpressionKind::Let { .. }
-            | st::ExpressionKind::Match { .. } => {
+            | st::ExpressionKind::Match { .. }
+            | st::ExpressionKind::If { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedType,
@@ -615,7 +697,8 @@ pub fn validate_pattern(
 
             st::ExpressionKind::Block { .. }
             | st::ExpressionKind::Call { .. }
-            | st::ExpressionKind::Match { .. } => {
+            | st::ExpressionKind::Match { .. }
+            | st::ExpressionKind::If { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: pattern.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedPattern,

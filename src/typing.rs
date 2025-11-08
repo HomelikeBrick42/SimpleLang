@@ -970,6 +970,10 @@ impl<'ast> Typer<'ast> {
                         kind: tt::TypeKind::Runtime,
                     })
                 }),
+
+                ast::BuiltinType::Bool => self
+                    .bool_type
+                    .expect("Bool type should have already been declared with #builtin"),
             },
         })
     }

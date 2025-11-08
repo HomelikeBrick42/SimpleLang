@@ -70,3 +70,11 @@ fn bool_testing(cond: Bool) -> I32 {
         Bool { true: Unit {} } => 1,
     }
 }
+
+fn more_bool_testing(cond: Bool) -> I32 {
+    if cond {
+        0
+    } else {
+        1
+    }
+}
