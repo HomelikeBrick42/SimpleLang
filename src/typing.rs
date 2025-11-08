@@ -7,7 +7,7 @@ use crate::{
 };
 use derive_more::Display;
 use rustc_hash::{FxBuildHasher, FxHashMap};
-use std::collections::hash_map::Entry;
+use std::{collections::hash_map::Entry, marker::PhantomData};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
@@ -66,6 +66,8 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         unit_type: None,
         i32_type: None,
         runtime_type: None,
+
+        _ast: PhantomData,
     };
     let mut global_names = FxHashMap::default();
     let mut errors = vec![];
@@ -141,18 +143,20 @@ enum ResolvedBindingKind {
     Variable(Id<tt::Variable>),
 }
 
-struct Typer {
+struct Typer<'ast> {
     types: IdMap<tt::Type>,
     functions: IdMap<tt::Function>,
     unit_type: Option<Id<tt::Type>>,
     i32_type: Option<Id<tt::Type>>,
     runtime_type: Option<Id<tt::Type>>,
+
+    _ast: PhantomData<&'ast ()>,
 }
 
-impl Typer {
+impl<'ast> Typer<'ast> {
     fn item(
         &mut self,
-        item: &ast::Item,
+        item: &'ast ast::Item,
         bindings: &mut FxHashMap<InternedStr, Binding>,
     ) -> Result<(), TypingError> {
         match item.kind {
@@ -374,7 +378,7 @@ impl Typer {
 
     fn statement(
         &mut self,
-        statement: &ast::Statement,
+        statement: &'ast ast::Statement,
         bindings: &mut FxHashMap<InternedStr, Binding>,
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<Option<tt::Statement>, TypingError> {
@@ -392,7 +396,7 @@ impl Typer {
 
     fn expression(
         &mut self,
-        expression: &ast::Expression,
+        expression: &'ast ast::Expression,
         bindings: &mut FxHashMap<InternedStr, Binding>,
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<tt::Expression, TypingError> {
@@ -592,7 +596,7 @@ impl Typer {
 
     fn typ(
         &mut self,
-        typ: &ast::Type,
+        typ: &'ast ast::Type,
         bindings: &mut FxHashMap<InternedStr, Binding>,
     ) -> Result<Id<tt::Type>, TypingError> {
         Ok(match typ.kind {
@@ -641,7 +645,7 @@ impl Typer {
 
     fn path(
         &mut self,
-        path: &ast::Path,
+        path: &'ast ast::Path,
         bindings: &mut FxHashMap<InternedStr, Binding>,
     ) -> Result<ResolvedBinding, TypingError> {
         match bindings.get(&path.name) {
