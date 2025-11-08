@@ -179,7 +179,7 @@ pub enum ExpressionKind {
         value: Option<Box<Expression>>,
     },
     Continue {
-        break_token: Token,
+        continue_token: Token,
         lifetime_token: Token,
     },
 }

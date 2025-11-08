@@ -528,6 +528,18 @@ pub fn parse_expression(
             },
         },
 
+        continue_token @ Token {
+            location,
+            kind: TokenKind::ContinueKeyword,
+        } => Expression {
+            label,
+            location,
+            kind: ExpressionKind::Continue {
+                continue_token,
+                lifetime_token: expect!(lexer, TokenKind::Lifetime(_))?,
+            },
+        },
+
         token => {
             return Err(ParsingError {
                 location: token.location,

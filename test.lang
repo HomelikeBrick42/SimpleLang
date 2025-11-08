@@ -97,3 +97,7 @@ fn label_testing2() -> I32 'return: {
     // the future when type inference has been added
     0
 }
+
+fn label_testing3() -> Never 'loop: {
+    continue 'loop
+}

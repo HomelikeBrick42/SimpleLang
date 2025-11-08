@@ -574,7 +574,7 @@ pub fn validate_expression(
             },
 
             st::ExpressionKind::Continue {
-                break_token: _,
+                continue_token: _,
                 ref lifetime_token,
             } => ast::ExpressionKind::Continue {
                 label: {
