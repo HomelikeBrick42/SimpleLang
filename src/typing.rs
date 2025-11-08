@@ -88,40 +88,38 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
 
     let mut function_bodies = IdSecondaryMap::new();
 
-    if errors.is_empty() {
-        while let Some(UnresolvedFunctionBody {
+    while let Some(UnresolvedFunctionBody {
+        id,
+        body,
+        names,
+        mut variables,
+        parameters,
+    }) = typer.unresolved_function_bodies.pop_front()
+    {
+        function_bodies.insert(
             id,
-            body,
-            names,
-            mut variables,
-            parameters,
-        }) = typer.unresolved_function_bodies.pop_front()
-        {
-            function_bodies.insert(
-                id,
-                match body {
-                    ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
-                        expression: Box::new(
-                            match typer.expression(expression, &names, &mut variables) {
-                                Ok(expression) => expression,
-                                Err(error) => {
-                                    errors.push(error);
-                                    continue;
-                                }
-                            },
-                        ),
-                        variables,
-                        parameters,
-                    },
-
-                    ast::FunctionBody::Builtin(builtin_function) => {
-                        tt::FunctionBody::Builtin(match builtin_function {
-                            ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
-                        })
-                    }
+            match body {
+                ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
+                    expression: Box::new(
+                        match typer.expression(expression, &names, &mut variables) {
+                            Ok(expression) => expression,
+                            Err(error) => {
+                                errors.push(error);
+                                continue;
+                            }
+                        },
+                    ),
+                    variables,
+                    parameters,
                 },
-            );
-        }
+
+                ast::FunctionBody::Builtin(builtin_function) => {
+                    tt::FunctionBody::Builtin(match builtin_function {
+                        ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
+                    })
+                }
+            },
+        );
     }
 
     TypingResult {
