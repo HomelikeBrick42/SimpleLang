@@ -150,6 +150,11 @@ pub enum ExpressionKind {
         name_token: Token,
         typ: Option<Box<ColonType>>,
     },
+    Match {
+        match_token: Token,
+        scruitnee: Box<Expression>,
+        body: MatchBody,
+    },
 }
 
 #[derive(Debug)]
@@ -176,5 +181,19 @@ pub struct ConstructorArguments {
 pub struct ConstructorArgument {
     pub name_token: Token,
     pub colon_token: Token,
+    pub value: Expression,
+}
+
+#[derive(Debug)]
+pub struct MatchBody {
+    pub open_brace_token: Token,
+    pub arms: Box<[MatchArm]>,
+    pub close_brace_token: Token,
+}
+
+#[derive(Debug)]
+pub struct MatchArm {
+    pub pattern: Expression,
+    pub fat_right_arrow_token: Token,
     pub value: Expression,
 }

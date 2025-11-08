@@ -93,6 +93,10 @@ pub enum ExpressionKind {
         typ: Box<Type>,
         arguments: Box<[ConstructorArgument]>,
     },
+    Match {
+        scruitnee: Box<Expression>,
+        arms: Box<[MatchArm]>,
+    },
 }
 
 #[derive(Debug)]
@@ -113,6 +117,13 @@ pub enum Constant {
 pub struct ConstructorArgument {
     pub location: SourceLocation,
     pub name: InternedStr,
+    pub value: Expression,
+}
+
+#[derive(Debug)]
+pub struct MatchArm {
+    pub location: SourceLocation,
+    pub pattern: Pattern,
     pub value: Expression,
 }
 

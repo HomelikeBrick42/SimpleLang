@@ -399,6 +399,35 @@ pub fn validate_expression(
                 },
             }),
 
+            st::ExpressionKind::Match {
+                match_token: _,
+                ref scruitnee,
+                body:
+                    st::MatchBody {
+                        open_brace_token: _,
+                        ref arms,
+                        close_brace_token: _,
+                    },
+            } => ast::ExpressionKind::Match {
+                scruitnee: Box::new(validate_expression(scruitnee)?),
+                arms: arms
+                    .iter()
+                    .map(
+                        |st::MatchArm {
+                             pattern,
+                             fat_right_arrow_token,
+                             value,
+                         }| {
+                            Ok(ast::MatchArm {
+                                location: fat_right_arrow_token.location,
+                                pattern: validate_pattern(pattern)?,
+                                value: validate_expression(value)?,
+                            })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?,
+            },
+
             st::ExpressionKind::Discard { .. } | st::ExpressionKind::Let { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
@@ -425,7 +454,8 @@ pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTre
             | st::ExpressionKind::Call { .. }
             | st::ExpressionKind::Constructor { .. }
             | st::ExpressionKind::MemberAccess { .. }
-            | st::ExpressionKind::Let { .. } => {
+            | st::ExpressionKind::Let { .. }
+            | st::ExpressionKind::Match { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedType,
@@ -530,7 +560,9 @@ pub fn validate_pattern(
                 }),
             },
 
-            st::ExpressionKind::Block { .. } | st::ExpressionKind::Call { .. } => {
+            st::ExpressionKind::Block { .. }
+            | st::ExpressionKind::Call { .. }
+            | st::ExpressionKind::Match { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: pattern.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedPattern,

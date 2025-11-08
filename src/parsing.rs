@@ -4,8 +4,8 @@ use crate::{
     syntax_tree::{
         Attribute, AttributeKind, CallArguments, ColonType, ConstructorArgument,
         ConstructorArguments, EqualsType, Expression, ExpressionKind, FunctionParameter,
-        FunctionParameters, FunctionReturnType, Item, ItemKind, Path, Statement, StatementKind,
-        StructMember, StructMembers,
+        FunctionParameters, FunctionReturnType, Item, ItemKind, MatchArm, MatchBody, Path,
+        Statement, StatementKind, StructMember, StructMembers,
     },
 };
 use derive_more::Display;
@@ -22,7 +22,7 @@ pub struct ParsingError {
 pub enum ParsingErrorKind {
     #[display("{_0}")]
     LexerError(LexerErrorKind),
-    #[display("Unexpected '{_0}'")]
+    #[display("Unexpected {_0}")]
     UnexpectedToken(Token),
 }
 
@@ -371,6 +371,45 @@ pub fn parse_expression(
                     }))
                 } else {
                     None
+                },
+            },
+        },
+
+        match_token @ Token {
+            location,
+            kind: TokenKind::MatchKeyword,
+        } => Expression {
+            location,
+            kind: ExpressionKind::Match {
+                match_token,
+                scruitnee: Box::new(parse_expression(lexer, false)?),
+                body: {
+                    let open_brace_token = expect!(lexer, TokenKind::OpenBrace)?;
+
+                    let mut arms = vec![];
+                    let close_brace_token = loop {
+                        while consume!(lexer, TokenKind::Newline).is_some() {}
+                        if let Some(close_brace_token) = consume!(lexer, TokenKind::CloseBrace) {
+                            break close_brace_token;
+                        }
+
+                        arms.push(MatchArm {
+                            pattern: parse_expression(lexer, true)?,
+                            fat_right_arrow_token: expect!(lexer, TokenKind::FatRightArrow)?,
+                            value: parse_expression(lexer, true)?,
+                        });
+
+                        if let Some(close_brace_token) = consume!(lexer, TokenKind::CloseBrace) {
+                            break close_brace_token;
+                        }
+                        expect!(lexer, TokenKind::Comma)?;
+                    };
+
+                    MatchBody {
+                        open_brace_token,
+                        arms: arms.into_boxed_slice(),
+                        close_brace_token,
+                    }
                 },
             },
         },

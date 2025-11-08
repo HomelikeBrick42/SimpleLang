@@ -45,3 +45,15 @@ fn a() {
 fn b() {
     a()
 }
+
+struct A {}
+
+struct B {
+    a: A,
+}
+
+fn match_testing(b: B) -> A {
+    match b {
+        B { a: let a: A } => a,
+    }
+}

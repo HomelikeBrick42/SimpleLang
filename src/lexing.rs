@@ -61,7 +61,7 @@ pub enum TokenKind {
     #[display(".")]
     Dot,
 
-    #[display("{_0}")]
+    #[display("'{_0}'")]
     Name(InternedStr),
     #[display("_")]
     Discard,

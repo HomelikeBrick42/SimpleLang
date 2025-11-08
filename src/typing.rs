@@ -101,7 +101,16 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
             match body {
                 ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
                     expression: Box::new(
-                        match typer.expression(expression, &names, &mut variables) {
+                        match typer
+                            .expression(expression, &names, &mut variables)
+                            .and_then(|expression| {
+                                typer.expect_types(
+                                    expression.location,
+                                    typer.functions[id].return_type,
+                                    expression.typ,
+                                )?;
+                                Ok(expression)
+                            }) {
                             Ok(expression) => expression,
                             Err(error) => {
                                 errors.push(error);
@@ -663,6 +672,50 @@ impl<'ast> Typer<'ast> {
                     location: expression.location,
                     typ,
                     kind: tt::ExpressionKind::StructConstructor { arguments },
+                }
+            }
+
+            ast::ExpressionKind::Match {
+                ref scruitnee,
+                ref arms,
+            } => {
+                let scruitnee = Box::new(self.expression(scruitnee, names, variables)?);
+
+                let mut arms_type = None;
+                let arms = arms
+                    .iter()
+                    .map(
+                        |&ast::MatchArm {
+                             location,
+                             ref pattern,
+                             ref value,
+                         }| {
+                            let mut names = names.clone();
+
+                            let pattern = self.pattern(pattern, &mut names, variables)?;
+                            self.expect_types(pattern.location, scruitnee.typ, pattern.typ)?;
+
+                            let value = self.expression(value, &names, variables)?;
+                            if let Some(arms_type) = arms_type {
+                                self.expect_types(value.location, arms_type, value.typ)?;
+                            } else {
+                                arms_type = Some(value.typ);
+                            }
+
+                            Ok(tt::MatchArm {
+                                location,
+                                pattern,
+                                value,
+                            })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?;
+                let typ = arms_type.expect("type inference is not implemented yet");
+
+                tt::Expression {
+                    location: expression.location,
+                    typ,
+                    kind: tt::ExpressionKind::Match { scruitnee, arms },
                 }
             }
         })
