@@ -15,16 +15,17 @@ fn main(runtime: Runtime) {
     print_i32(5, runtime)
     print_i32(10, runtime)
 
-/*
-    let foo = Foo {
+    // declaring variables
+    let foo: Foo = Foo {
+        member: Unit {},
+    }
+
+    // reassigning variables
+    foo = Foo {
         member: {}, // shorter way to construct the Unit type, just make the compiler do it for you
     }
 
     foo.member
-*/
-    Foo {
-        member: {}, // shorter way to construct the Unit type, just make the compiler do it for you
-    }.member
 }
 
 // below main to prove that out-of-order declarations work

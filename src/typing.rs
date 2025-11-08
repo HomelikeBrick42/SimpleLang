@@ -46,6 +46,11 @@ pub enum TypingErrorKind {
         original_location: SourceLocation,
         name: InternedStr,
     },
+    #[display("The '{name}' member has already been deconstructed at {original_location}")]
+    MemberAlreadyDeconstructed {
+        original_location: SourceLocation,
+        name: InternedStr,
+    },
     #[display("Expected a struct type but got {got:?}")]
     ExpectedStructTypeButGot { got: Id<tt::Type> },
     #[display("Expected a type but got thing declared at {declared_location}")]
@@ -475,7 +480,15 @@ impl<'ast> Typer<'ast> {
                         )))
                     }
 
-                    ast::StatementKind::Assignment { .. } => todo!(),
+                    ast::StatementKind::Assignment {
+                        ref pattern,
+                        ref value,
+                    } => {
+                        let pattern = Box::new(self.pattern(pattern, names, variables)?);
+                        let value = Box::new(self.expression(value, names, variables)?);
+                        self.expect_types(statement.location, pattern.typ, value.typ)?;
+                        Some(tt::Statement::Assignment { pattern, value })
+                    }
                 })
             })
             .filter_map(|result| result.transpose())
@@ -489,75 +502,24 @@ impl<'ast> Typer<'ast> {
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<tt::Expression, TypingError> {
         Ok(match expression.kind {
-            ast::ExpressionKind::Place(ref place) => match *place {
-                ast::Place::Path(ref path) => match self.path(path, names)? {
-                    ResolvedBinding {
-                        location: _,
-                        kind: ResolvedBindingKind::Function(id),
-                    } => tt::Expression {
-                        location: expression.location,
-                        typ: self.functions[id].typ,
-                        kind: tt::ExpressionKind::Place(tt::Place::Function(id)),
-                    },
-
-                    ResolvedBinding {
-                        location: _,
-                        kind: ResolvedBindingKind::Variable(id),
-                    } => tt::Expression {
-                        location: expression.location,
-                        typ: variables[id].typ,
-                        kind: tt::ExpressionKind::Place(tt::Place::Variable(id)),
-                    },
-
-                    ResolvedBinding {
-                        location: declared_location,
-                        kind: _,
-                    } => {
-                        return Err(TypingError {
-                            location: path.location,
-                            kind: TypingErrorKind::ExpectedValue { declared_location },
-                        });
-                    }
-                },
-
-                ast::Place::MemberAccess {
-                    ref operand,
-                    member_name,
-                } => {
-                    let operand = Box::new(self.expression(operand, names, variables)?);
-                    let tt::TypeKind::Struct { ref members } = self.types[operand.typ].kind else {
-                        return Err(TypingError {
-                            location: operand.location,
-                            kind: TypingErrorKind::ExpectedStructTypeButGot { got: operand.typ },
-                        });
-                    };
-
-                    let member_index = members
-                        .iter()
-                        .position(|member| member.name == member_name)
-                        .ok_or(TypingError {
-                            location: expression.location,
-                            kind: TypingErrorKind::UnknownName { name: member_name },
-                        })?;
-
-                    tt::Expression {
-                        location: expression.location,
-                        typ: members[member_index].typ,
-                        kind: tt::ExpressionKind::Place(tt::Place::StructMemberAccess {
-                            operand,
-                            member_index,
-                        }),
-                    }
+            ast::ExpressionKind::Place(ref place) => {
+                let (place, typ) = self.place(place, expression.location, names, variables)?;
+                tt::Expression {
+                    location: expression.location,
+                    typ,
+                    kind: tt::ExpressionKind::Place(place),
                 }
-            },
+            }
 
-            ast::ExpressionKind::Integer(value) => tt::Expression {
-                location: expression.location,
-                typ: self
-                    .i32_type
-                    .expect("the I32 type should have already been defined"),
-                kind: tt::ExpressionKind::Integer(value),
-            },
+            ast::ExpressionKind::Constant(ref constant) => {
+                let (constant, typ) =
+                    self.constant(constant, expression.location, names, variables)?;
+                tt::Expression {
+                    location: expression.location,
+                    typ,
+                    kind: tt::ExpressionKind::Constant(constant),
+                }
+            }
 
             ast::ExpressionKind::Block {
                 ref statements,
@@ -708,6 +670,83 @@ impl<'ast> Typer<'ast> {
         })
     }
 
+    fn place(
+        &mut self,
+        place: &'ast ast::Place,
+        location: SourceLocation,
+        names: &Names<'ast>,
+        variables: &mut IdMap<tt::Variable>,
+    ) -> Result<(tt::Place, Id<tt::Type>), TypingError> {
+        Ok(match *place {
+            ast::Place::Path(ref path) => match self.path(path, names)? {
+                ResolvedBinding {
+                    location: _,
+                    kind: ResolvedBindingKind::Function(id),
+                } => (tt::Place::Function(id), self.functions[id].typ),
+
+                ResolvedBinding {
+                    location: _,
+                    kind: ResolvedBindingKind::Variable(id),
+                } => (tt::Place::Variable(id), variables[id].typ),
+
+                ResolvedBinding {
+                    location: declared_location,
+                    kind: _,
+                } => {
+                    return Err(TypingError {
+                        location: path.location,
+                        kind: TypingErrorKind::ExpectedValue { declared_location },
+                    });
+                }
+            },
+
+            ast::Place::MemberAccess {
+                ref operand,
+                member_name,
+            } => {
+                let operand = Box::new(self.expression(operand, names, variables)?);
+                let tt::TypeKind::Struct { ref members } = self.types[operand.typ].kind else {
+                    return Err(TypingError {
+                        location: operand.location,
+                        kind: TypingErrorKind::ExpectedStructTypeButGot { got: operand.typ },
+                    });
+                };
+
+                let member_index = members
+                    .iter()
+                    .position(|member| member.name == member_name)
+                    .ok_or(TypingError {
+                        location,
+                        kind: TypingErrorKind::UnknownName { name: member_name },
+                    })?;
+
+                (
+                    tt::Place::StructMemberAccess {
+                        operand,
+                        member_index,
+                    },
+                    members[member_index].typ,
+                )
+            }
+        })
+    }
+
+    fn constant(
+        &mut self,
+        constant: &ast::Constant,
+        #[expect(unused)] location: SourceLocation,
+        #[expect(unused)] names: &Names<'ast>,
+        #[expect(unused)] variables: &mut IdMap<tt::Variable>,
+    ) -> Result<(tt::Constant, Id<tt::Type>), TypingError> {
+        Ok(match *constant {
+            ast::Constant::Integer(value) => (
+                tt::Constant::Integer(value),
+                self.i32_type
+                    .expect("the I32 type should have already been defined"),
+            ),
+        })
+    }
+
     fn typ(
         &mut self,
         typ: &'ast ast::Type,
@@ -754,6 +793,149 @@ impl<'ast> Typer<'ast> {
                     })
                 }),
             },
+        })
+    }
+
+    fn pattern(
+        &mut self,
+        pattern: &'ast ast::Pattern,
+        names: &mut Names<'ast>,
+        variables: &mut IdMap<tt::Variable>,
+    ) -> Result<tt::Pattern, TypingError> {
+        Ok(match pattern.kind {
+            ast::PatternKind::Discard => panic!(
+                "{}: type inference is not implemented yet",
+                pattern.location
+            ),
+
+            ast::PatternKind::Place(ref place) => {
+                let (place, typ) = self.place(place, pattern.location, names, variables)?;
+                tt::Pattern {
+                    location: pattern.location,
+                    typ,
+                    kind: tt::PatternKind::Place(place),
+                }
+            }
+
+            ast::PatternKind::Constant(ref constant) => {
+                let (constant, typ) =
+                    self.constant(constant, pattern.location, names, variables)?;
+                tt::Pattern {
+                    location: pattern.location,
+                    typ,
+                    kind: tt::PatternKind::Constant(constant),
+                }
+            }
+
+            ast::PatternKind::Deconstructor {
+                ref typ,
+                ref arguments,
+            } => {
+                let typ_location = typ.location;
+                let typ = self.typ(typ, names)?;
+                let tt::TypeKind::Struct { ref members } = self.types[typ].kind else {
+                    return Err(TypingError {
+                        location: typ_location,
+                        kind: TypingErrorKind::ExpectedStructTypeButGot { got: typ },
+                    });
+                };
+
+                let mut initialised_members =
+                    FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
+                        members.len(),
+                        FxBuildHasher,
+                    );
+                let mut members_to_deconstruct = members
+                    .iter()
+                    .enumerate()
+                    .map(
+                        |(
+                            index,
+                            &tt::StructMember {
+                                location,
+                                name,
+                                typ,
+                            },
+                        )| (name, (location, index, typ)),
+                    )
+                    .collect::<FxHashMap<_, _>>();
+
+                let arguments = arguments
+                    .iter()
+                    .map(
+                        |&ast::DeconstructorArgument {
+                             location,
+                             name,
+                             ref pattern,
+                         }| {
+                            let pattern = self.pattern(pattern, names, variables)?;
+
+                            if let Some(&original_location) = initialised_members.get(&name) {
+                                return Err(TypingError {
+                                    location,
+                                    kind: TypingErrorKind::MemberAlreadyDeconstructed {
+                                        original_location,
+                                        name,
+                                    },
+                                });
+                            }
+                            initialised_members.insert(name, location);
+
+                            let Some((_, member_index, typ)) = members_to_deconstruct.remove(&name)
+                            else {
+                                return Err(TypingError {
+                                    location,
+                                    kind: TypingErrorKind::UnknownName { name },
+                                });
+                            };
+
+                            self.expect_types(pattern.location, typ, pattern.typ)?;
+
+                            Ok(tt::StructDeconstructorArgument {
+                                member_index,
+                                pattern,
+                            })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?;
+
+                if let Some((name, (location, _, _))) = members_to_deconstruct.into_iter().next() {
+                    return Err(TypingError {
+                        location,
+                        kind: TypingErrorKind::MemberLeftUninitialised { name },
+                    });
+                }
+
+                tt::Pattern {
+                    location: pattern.location,
+                    typ,
+                    kind: tt::PatternKind::StructDeconstructor { arguments },
+                }
+            }
+
+            ast::PatternKind::Let { name, ref typ } => {
+                let typ = self.typ(typ, names)?;
+                let variable = variables.insert(tt::Variable {
+                    location: pattern.location,
+                    name: Some(name),
+                    typ,
+                });
+                names.insert(
+                    name,
+                    self.bindings.insert(Binding {
+                        location: pattern.location,
+                        kind: BindingKind::Resolved(ResolvedBinding {
+                            location: pattern.location,
+                            kind: ResolvedBindingKind::Variable(variable),
+                        }),
+                    }),
+                );
+                tt::Pattern {
+                    location: pattern.location,
+                    typ,
+                    kind: tt::PatternKind::Let { variable },
+                }
+            }
         })
     }
 

@@ -80,7 +80,7 @@ pub struct Expression {
 #[derive(Debug)]
 pub enum ExpressionKind {
     Place(Place),
-    Integer(u64),
+    Constant(Constant),
     Block {
         statements: Box<[Statement]>,
         last_expression: Box<Expression>,
@@ -102,6 +102,11 @@ pub enum Place {
         operand: Box<Expression>,
         member_name: InternedStr,
     },
+}
+
+#[derive(Debug)]
+pub enum Constant {
+    Integer(u64),
 }
 
 #[derive(Debug)]
@@ -141,14 +146,10 @@ pub struct Pattern {
 pub enum PatternKind {
     Discard,
     Place(Place),
-    Integer(u64),
-    Destructor {
+    Constant(Constant),
+    Deconstructor {
         typ: Box<Type>,
-        arguments: Box<[DestructorArgument]>,
-    },
-    MemberAccess {
-        operand: Box<Expression>,
-        member_name: InternedStr,
+        arguments: Box<[DeconstructorArgument]>,
     },
     Let {
         name: InternedStr,
@@ -157,7 +158,7 @@ pub enum PatternKind {
 }
 
 #[derive(Debug)]
-pub struct DestructorArgument {
+pub struct DeconstructorArgument {
     pub location: SourceLocation,
     pub name: InternedStr,
     pub pattern: Pattern,

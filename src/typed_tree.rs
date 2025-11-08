@@ -58,6 +58,10 @@ pub struct StructMember {
 #[derive(Debug)]
 pub enum Statement {
     Expression(Box<Expression>),
+    Assignment {
+        pattern: Box<Pattern>,
+        value: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]
@@ -70,7 +74,7 @@ pub struct Expression {
 #[derive(Debug)]
 pub enum ExpressionKind {
     Place(Place),
-    Integer(u64),
+    Constant(Constant),
     Block {
         statements: Box<[Statement]>,
         last_expression: Box<Expression>,
@@ -95,6 +99,11 @@ pub enum Place {
 }
 
 #[derive(Debug)]
+pub enum Constant {
+    Integer(u64),
+}
+
+#[derive(Debug)]
 pub struct StructConstructorArgument {
     pub member_index: usize,
     pub value: Expression,
@@ -111,19 +120,17 @@ pub struct Pattern {
 pub enum PatternKind {
     Discard,
     Place(Place),
-    Integer(u64),
-    StructDestructor {
-        typ: Box<Type>,
-        arguments: Box<[StructDestructorArgument]>,
+    Constant(Constant),
+    StructDeconstructor {
+        arguments: Box<[StructDeconstructorArgument]>,
     },
     Let {
-        name: InternedStr,
-        typ: Box<Type>,
+        variable: Id<Variable>,
     },
 }
 
 #[derive(Debug)]
-pub struct StructDestructorArgument {
+pub struct StructDeconstructorArgument {
     pub member_index: usize,
-    pub value: Expression,
+    pub pattern: Pattern,
 }

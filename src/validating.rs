@@ -317,12 +317,14 @@ pub fn validate_expression(
                 }
             }
 
-            st::ExpressionKind::Integer { ref integer_token } => ast::ExpressionKind::Integer({
-                let TokenKind::Integer(value) = integer_token.kind else {
-                    unreachable!("{integer_token:?}")
-                };
-                value
-            }),
+            st::ExpressionKind::Integer { ref integer_token } => {
+                ast::ExpressionKind::Constant(ast::Constant::Integer({
+                    let TokenKind::Integer(value) = integer_token.kind else {
+                        unreachable!("{integer_token:?}")
+                    };
+                    value
+                }))
+            }
 
             st::ExpressionKind::Path(ref path) => {
                 ast::ExpressionKind::Place(ast::Place::Path(Box::new(validate_path(path)?)))
@@ -445,12 +447,14 @@ pub fn validate_pattern(
                 ast::PatternKind::Place(ast::Place::Path(Box::new(validate_path(path)?)))
             }
 
-            st::ExpressionKind::Integer { ref integer_token } => ast::PatternKind::Integer({
-                let TokenKind::Integer(value) = integer_token.kind else {
-                    unreachable!("{integer_token:?}")
-                };
-                value
-            }),
+            st::ExpressionKind::Integer { ref integer_token } => {
+                ast::PatternKind::Constant(ast::Constant::Integer({
+                    let TokenKind::Integer(value) = integer_token.kind else {
+                        unreachable!("{integer_token:?}")
+                    };
+                    value
+                }))
+            }
 
             st::ExpressionKind::ParenthesizedExpression {
                 open_parenthesis_token: _,
@@ -466,7 +470,7 @@ pub fn validate_pattern(
                         ref arguments,
                         close_brace_token: _,
                     },
-            } => ast::PatternKind::Destructor {
+            } => ast::PatternKind::Deconstructor {
                 typ: Box::new(validate_type(typ)?),
                 arguments: arguments
                     .iter()
@@ -476,7 +480,7 @@ pub fn validate_pattern(
                              colon_token: _,
                              value,
                          }| {
-                            Ok(ast::DestructorArgument {
+                            Ok(ast::DeconstructorArgument {
                                 location: name_token.location,
                                 name: {
                                     let TokenKind::Name(name) = name_token.kind else {
@@ -495,7 +499,7 @@ pub fn validate_pattern(
                 ref operand,
                 dot_token: _,
                 ref name_token,
-            } => ast::PatternKind::MemberAccess {
+            } => ast::PatternKind::Place(ast::Place::MemberAccess {
                 operand: Box::new(validate_expression(operand)?),
                 member_name: {
                     let TokenKind::Name(name) = name_token.kind else {
@@ -503,7 +507,7 @@ pub fn validate_pattern(
                     };
                     name
                 },
-            },
+            }),
 
             st::ExpressionKind::Let {
                 ref let_token,
