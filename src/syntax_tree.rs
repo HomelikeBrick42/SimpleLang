@@ -114,8 +114,15 @@ pub enum StatementKind {
 
 #[derive(Debug)]
 pub struct Expression {
+    pub label: Option<Box<Label>>,
     pub location: SourceLocation,
     pub kind: ExpressionKind,
+}
+
+#[derive(Debug)]
+pub struct Label {
+    pub lifetime_token: Token,
+    pub colon_token: Token,
 }
 
 #[derive(Debug)]

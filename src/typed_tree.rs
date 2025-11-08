@@ -77,6 +77,7 @@ pub enum ExpressionKind {
     Place(Place),
     Constant(Constant),
     Block {
+        label: Id<Label>,
         statements: Box<[Statement]>,
         last_expression: Box<Expression>,
     },
@@ -107,6 +108,8 @@ pub enum Place {
 pub enum Constant {
     Integer(u64),
 }
+
+pub struct Label;
 
 #[derive(Debug)]
 pub struct ConstructorArgument {

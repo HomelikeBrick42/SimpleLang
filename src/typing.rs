@@ -85,6 +85,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         types: IdMap::new(),
         functions: IdMap::new(),
         unit_type: None,
+        never_type: None,
         i32_type: None,
         runtime_type: None,
         bool_type: None,
@@ -92,7 +93,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         bindings: IdMap::new(),
         unresolved_function_bodies: VecDeque::new(),
     };
-    let mut global_names = FxHashMap::default();
+    let mut global_names = Default::default();
     let mut errors = vec![];
 
     if let Err(error) = typer.handle_items(items.iter(), &mut global_names) {
@@ -150,6 +151,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         function_bodies,
         global_names: if errors.is_empty() {
             global_names
+            .variables_and_types
             .into_iter()
             .map(|(name, binding)| {
                 (
@@ -240,6 +242,7 @@ struct Typer<'ast> {
     types: IdMap<tt::Type>,
     functions: IdMap<tt::Function>,
     unit_type: Option<Id<tt::Type>>,
+    never_type: Option<Id<tt::Type>>,
     i32_type: Option<Id<tt::Type>>,
     runtime_type: Option<Id<tt::Type>>,
     bool_type: Option<Id<tt::Type>>,
@@ -248,7 +251,11 @@ struct Typer<'ast> {
     unresolved_function_bodies: VecDeque<UnresolvedFunctionBody<'ast>>,
 }
 
-type Names<'ast> = FxHashMap<InternedStr, Id<Binding<'ast>>>;
+#[derive(Default, Debug, Clone)]
+struct Names<'ast> {
+    variables_and_types: FxHashMap<InternedStr, Id<Binding<'ast>>>,
+    labels: FxHashMap<InternedStr, Id<tt::Label>>,
+}
 
 impl<'ast> Typer<'ast> {
     fn handle_items(
@@ -269,10 +276,10 @@ impl<'ast> Typer<'ast> {
                 location: item.location,
                 kind: BindingKind::UnresolvedItem {
                     item,
-                    names: FxHashMap::default(),
+                    names: Default::default(),
                 },
             });
-            names.insert(name, id);
+            names.variables_and_types.insert(name, id);
             inserted_items.push((id, item));
         }
 
@@ -420,6 +427,14 @@ impl<'ast> Typer<'ast> {
 
                 if let Some(builtin) = builtin {
                     match *builtin {
+                        ast::BuiltinEnum::Never => {
+                            assert!(
+                                self.never_type.is_none(),
+                                "#builtin Never type cannot be declared twice"
+                            );
+                            self.never_type = Some(id);
+                        }
+
                         ast::BuiltinEnum::Bool => {
                             assert!(
                                 self.bool_type.is_none(),
@@ -450,8 +465,9 @@ impl<'ast> Typer<'ast> {
                 ref return_type,
                 ref body,
             } => {
-                let mut local_names =
-                    names
+                let mut local_names = Names {
+                    variables_and_types: names
+                        .variables_and_types
                         .clone()
                         .into_iter()
                         .filter(|&(_, binding)| match self.bindings[binding].kind {
@@ -467,7 +483,9 @@ impl<'ast> Typer<'ast> {
                                 }
                             }
                         })
-                        .collect::<Names<'ast>>();
+                        .collect(),
+                    labels: Default::default(),
+                };
 
                 let mut parameter_variables = Vec::with_capacity(parameters.len());
 
@@ -489,7 +507,7 @@ impl<'ast> Typer<'ast> {
 
                             parameter_variables.push(variable);
 
-                            local_names.insert(
+                            local_names.variables_and_types.insert(
                                 name,
                                 self.bindings.insert(Binding {
                                     location,
@@ -603,6 +621,7 @@ impl<'ast> Typer<'ast> {
             }
 
             ast::ExpressionKind::Block {
+                label,
                 ref statements,
                 ref last_expression,
             } => {
@@ -610,10 +629,17 @@ impl<'ast> Typer<'ast> {
                 let statements = self.statements(statements.iter(), &mut names, variables)?;
                 let last_expression =
                     Box::new(self.expression(last_expression, &names, variables)?);
+
+                let label_id = Id::new();
+                if let Some(label) = label {
+                    names.labels.insert(label, label_id);
+                }
+
                 tt::Expression {
                     location: expression.location,
                     typ: last_expression.typ,
                     kind: tt::ExpressionKind::Block {
+                        label: label_id,
                         statements,
                         last_expression,
                     },
@@ -957,6 +983,10 @@ impl<'ast> Typer<'ast> {
                     .unit_type
                     .expect("Unit type should have already been declared with #builtin"),
 
+                ast::BuiltinType::Never => self
+                    .never_type
+                    .expect("Never type should have already been declared with #builtin"),
+
                 ast::BuiltinType::I32 => *self.i32_type.get_or_insert_with(|| {
                     self.types.insert(tt::Type {
                         location: typ.location,
@@ -1155,7 +1185,7 @@ impl<'ast> Typer<'ast> {
                     name: Some(name),
                     typ,
                 });
-                names.insert(
+                names.variables_and_types.insert(
                     name,
                     self.bindings.insert(Binding {
                         location: pattern.location,
@@ -1179,7 +1209,7 @@ impl<'ast> Typer<'ast> {
         path: &'ast ast::Path,
         names: &Names<'ast>,
     ) -> Result<ResolvedBinding, TypingError> {
-        match names.get(&path.name) {
+        match names.variables_and_types.get(&path.name) {
             Some(&id) => match self.bindings[id].kind {
                 BindingKind::UnresolvedItem {
                     item,

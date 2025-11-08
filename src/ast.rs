@@ -37,6 +37,7 @@ pub enum BuiltinStruct {
 
 #[derive(Debug)]
 pub enum BuiltinEnum {
+    Never,
     Bool,
 }
 
@@ -92,6 +93,7 @@ pub enum ExpressionKind {
     Place(Place),
     Constant(Constant),
     Block {
+        label: Option<InternedStr>,
         statements: Box<[Statement]>,
         last_expression: Box<Expression>,
     },
@@ -153,6 +155,7 @@ pub enum TypeKind {
 #[derive(Debug)]
 pub enum BuiltinType {
     Unit,
+    Never,
     I32,
     Runtime,
     Bool,

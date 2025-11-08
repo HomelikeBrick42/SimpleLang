@@ -4,7 +4,7 @@ use crate::{
     syntax_tree::{
         Attribute, AttributeKind, CallArguments, ColonType, ConstructorArgument,
         ConstructorArguments, Else, EqualsType, Expression, ExpressionKind, FunctionParameter,
-        FunctionParameters, FunctionReturnType, Item, ItemKind, MatchArm, MatchBody, Member,
+        FunctionParameters, FunctionReturnType, Item, ItemKind, Label, MatchArm, MatchBody, Member,
         Members, Path, Statement, StatementKind,
     },
 };
@@ -266,7 +266,7 @@ pub fn parse_item(lexer: &mut Lexer) -> Result<Item, ParsingError> {
                     None => None,
                 },
 
-                body: if peek!(lexer, TokenKind::OpenBrace).is_some() {
+                body: if peek!(lexer, TokenKind::Newline).is_none() {
                     Some(Box::new(parse_expression(lexer, true)?))
                 } else {
                     None
@@ -327,11 +327,21 @@ pub fn parse_expression(
     lexer: &mut Lexer,
     postfix_brace_allowed: bool,
 ) -> Result<Expression, ParsingError> {
+    let label = if let Some(lifetime_token) = consume!(lexer, TokenKind::Lifetime(_)) {
+        Some(Box::new(Label {
+            lifetime_token,
+            colon_token: expect!(lexer, TokenKind::Colon)?,
+        }))
+    } else {
+        None
+    };
+
     let mut expression = match lexer.next_token()? {
         open_brace_token @ Token {
             location,
             kind: TokenKind::OpenBrace,
         } => Expression {
+            label,
             location,
             kind: {
                 let mut statements = vec![];
@@ -361,6 +371,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::Integer(_),
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::Integer { integer_token },
         },
@@ -369,6 +380,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::Name(_),
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::Path(Box::new(Path {
                 location,
@@ -380,6 +392,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::Discard,
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::Discard { discard_token },
         },
@@ -388,6 +401,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::OpenParenthesis,
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::ParenthesizedExpression {
                 open_parenthesis_token,
@@ -400,6 +414,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::LetKeyword,
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::Let {
                 let_token,
@@ -419,6 +434,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::MatchKeyword,
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::Match {
                 match_token,
@@ -458,6 +474,7 @@ pub fn parse_expression(
             location,
             kind: TokenKind::IfKeyword,
         } => Expression {
+            label,
             location,
             kind: ExpressionKind::If {
                 if_token,
@@ -490,6 +507,7 @@ pub fn parse_expression(
                     kind: TokenKind::OpenParenthesis,
                 },
             ) => Expression {
+                label: expression.label.take(),
                 location,
                 kind: ExpressionKind::Call {
                     operand: Box::new(expression),
@@ -530,6 +548,7 @@ pub fn parse_expression(
                     kind: TokenKind::OpenBrace,
                 },
             ) if postfix_brace_allowed => Expression {
+                label: expression.label.take(),
                 location,
                 kind: ExpressionKind::Constructor {
                     typ: Box::new(expression),
@@ -572,6 +591,7 @@ pub fn parse_expression(
                     kind: TokenKind::Dot,
                 },
             ) => Expression {
+                label: expression.label.take(),
                 location,
                 kind: ExpressionKind::MemberAccess {
                     operand: Box::new(expression),

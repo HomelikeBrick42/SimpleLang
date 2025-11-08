@@ -1,6 +1,9 @@
 #builtin("Unit")
 struct Unit {}
 
+#builtin("Never")
+enum Never {}
+
 #builtin("I32")
 type I32
 
@@ -77,4 +80,7 @@ fn more_bool_testing(cond: Bool) -> I32 {
     } else {
         0
     }
+}
+
+fn label_testing() 'return: {
 }

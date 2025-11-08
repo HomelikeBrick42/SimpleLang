@@ -84,6 +84,8 @@ pub enum TokenKind {
     #[display("const keyword")]
     ConstKeyword,
 
+    #[display("'{_0}")]
+    Lifetime(InternedStr),
     #[display("{_0}")]
     Integer(u64),
     #[display("{_0:?}")]
@@ -376,6 +378,18 @@ impl<'source> Lexer<'source> {
                         }
 
                         TokenKind::Integer(value)
+                    }
+
+                    '\'' => {
+                        let start = self.location;
+
+                        while let Some('A'..='Z' | 'a'..='z' | '0'..='9' | '_') = self.peek_char() {
+                            self.next_char();
+                        }
+
+                        TokenKind::Lifetime(
+                            self.source[start.position..self.location.position].into(),
+                        )
                     }
 
                     '"' => {

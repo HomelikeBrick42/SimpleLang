@@ -34,6 +34,8 @@ pub enum SyntaxTreeValidationErrorKind {
     FunctionMustHaveBody,
     #[display("#builtin function must not have a body")]
     BuiltinFunctionMustNotHaveBody,
+    #[display("Labels can only be used on blocks or loops")]
+    LabelsCanOnlyBeUsedOnBlocksOrLoops,
 }
 
 pub fn validate_items(items: &[st::Item]) -> Result<Box<[ast::Item]>, SyntaxTreeValidationError> {
@@ -133,6 +135,8 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
             } => ast::ItemKind::Enum {
                 builtin: if let Some((location, builtin_name)) = builtin_attribute {
                     Some(match builtin_name.as_str() {
+                        "Never" => ast::BuiltinEnum::Never,
+
                         "Bool" => ast::BuiltinEnum::Bool,
 
                         _ => {
@@ -331,6 +335,15 @@ pub fn validate_statement(
 pub fn validate_expression(
     expression: &st::Expression,
 ) -> Result<ast::Expression, SyntaxTreeValidationError> {
+    if let Some(ref label) = expression.label
+        && !matches!(expression.kind, st::ExpressionKind::Block { .. })
+    {
+        return Err(SyntaxTreeValidationError {
+            location: label.lifetime_token.location,
+            kind: SyntaxTreeValidationErrorKind::LabelsCanOnlyBeUsedOnBlocksOrLoops,
+        });
+    }
+
     Ok(ast::Expression {
         location: expression.location,
         kind: match expression.kind {
@@ -356,6 +369,12 @@ pub fn validate_expression(
                 };
 
                 ast::ExpressionKind::Block {
+                    label: expression.label.as_ref().map(|label| {
+                        let TokenKind::Lifetime(name) = label.lifetime_token.kind else {
+                            unreachable!("{:?}", label.lifetime_token)
+                        };
+                        name
+                    }),
                     statements: statements.into_boxed_slice(),
                     last_expression,
                 }
