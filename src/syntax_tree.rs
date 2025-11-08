@@ -129,6 +129,11 @@ pub enum ExpressionKind {
         typ: Box<Expression>,
         arguments: ConstructorArguments,
     },
+    MemberAccess {
+        operand: Box<Expression>,
+        dot_token: Token,
+        name_token: Token,
+    },
 }
 
 #[derive(Debug)]

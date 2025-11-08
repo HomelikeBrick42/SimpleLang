@@ -58,6 +58,8 @@ pub enum TokenKind {
     Asterisk,
     #[display("/")]
     Slash,
+    #[display(".")]
+    Dot,
 
     #[display("{_0}")]
     Name(InternedStr),
@@ -256,6 +258,7 @@ impl<'source> Lexer<'source> {
 
                         _ => TokenKind::Slash,
                     },
+                    '.' => TokenKind::Dot,
 
                     // identifiers
                     'A'..='Z' | 'a'..='z' | '_' => {

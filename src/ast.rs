@@ -89,6 +89,10 @@ pub enum ExpressionKind {
         typ: Box<Type>,
         arguments: Box<[ConstructorArgument]>,
     },
+    MemberAccess {
+        operand: Box<Expression>,
+        member_name: InternedStr,
+    },
 }
 
 #[derive(Debug)]

@@ -84,6 +84,10 @@ pub enum ExpressionKind {
     StructConstructor {
         arguments: Box<[StructConstructorArgument]>,
     },
+    StructMemberAccess {
+        operand: Box<Expression>,
+        member_index: usize,
+    },
 }
 
 #[derive(Debug)]

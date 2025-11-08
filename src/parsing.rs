@@ -431,6 +431,24 @@ pub fn parse_expression(
                 },
             },
 
+            Some(
+                dot_token @ Token {
+                    location,
+                    kind: TokenKind::Dot,
+                },
+            ) => Expression {
+                location,
+                kind: ExpressionKind::MemberAccess {
+                    operand: Box::new(expression),
+                    dot_token,
+                    name_token: {
+                        lexer.next_token()?;
+
+                        expect!(lexer, TokenKind::Name(_))?
+                    },
+                },
+            },
+
             _ => break,
         };
     }

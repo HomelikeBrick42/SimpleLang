@@ -373,7 +373,7 @@ impl<'ast> Typer<'ast> {
                     ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
                         expression: Box::new(self.expression(
                             expression,
-                            &mut local_names,
+                            &local_names,
                             &mut variables,
                         )?),
                         variables,
@@ -441,7 +441,7 @@ impl<'ast> Typer<'ast> {
     fn expression(
         &mut self,
         expression: &'ast ast::Expression,
-        names: &mut Names<'ast>,
+        names: &Names<'ast>,
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<tt::Expression, TypingError> {
         Ok(match expression.kind {
@@ -490,7 +490,7 @@ impl<'ast> Typer<'ast> {
                 let mut names = names.clone();
                 let statements = self.statements(statements.iter(), &mut names, variables)?;
                 let last_expression =
-                    Box::new(self.expression(last_expression, &mut names, variables)?);
+                    Box::new(self.expression(last_expression, &names, variables)?);
                 tt::Expression {
                     location: expression.location,
                     typ: last_expression.typ,
@@ -629,13 +629,43 @@ impl<'ast> Typer<'ast> {
                     kind: tt::ExpressionKind::StructConstructor { arguments },
                 }
             }
+
+            ast::ExpressionKind::MemberAccess {
+                ref operand,
+                member_name,
+            } => {
+                let operand = Box::new(self.expression(operand, names, variables)?);
+                let tt::TypeKind::Struct { ref members } = self.types[operand.typ].kind else {
+                    return Err(TypingError {
+                        location: operand.location,
+                        kind: TypingErrorKind::ExpectedStructTypeButGot { got: operand.typ },
+                    });
+                };
+
+                let member_index = members
+                    .iter()
+                    .position(|member| member.name == member_name)
+                    .ok_or(TypingError {
+                        location: expression.location,
+                        kind: TypingErrorKind::UnknownName { name: member_name },
+                    })?;
+
+                tt::Expression {
+                    location: expression.location,
+                    typ: members[member_index].typ,
+                    kind: tt::ExpressionKind::StructMemberAccess {
+                        operand,
+                        member_index,
+                    },
+                }
+            }
         })
     }
 
     fn typ(
         &mut self,
         typ: &'ast ast::Type,
-        names: &mut Names<'ast>,
+        names: &Names<'ast>,
     ) -> Result<Id<tt::Type>, TypingError> {
         Ok(match typ.kind {
             ast::TypeKind::Infer => {
@@ -684,7 +714,7 @@ impl<'ast> Typer<'ast> {
     fn path(
         &mut self,
         path: &'ast ast::Path,
-        names: &mut Names<'ast>,
+        names: &Names<'ast>,
     ) -> Result<ResolvedBinding, TypingError> {
         match names.get(&path.name) {
             Some(&id) => match self.bindings[id].kind {

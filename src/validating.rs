@@ -378,6 +378,20 @@ pub fn validate_expression(
                     kind: SyntaxTreeValidationErrorKind::ExpectedValue,
                 });
             }
+
+            st::ExpressionKind::MemberAccess {
+                ref operand,
+                dot_token: _,
+                ref name_token,
+            } => ast::ExpressionKind::MemberAccess {
+                operand: Box::new(validate_expression(operand)?),
+                member_name: {
+                    let TokenKind::Name(name) = name_token.kind else {
+                        unreachable!("{name_token:?}")
+                    };
+                    name
+                },
+            },
         },
     })
 }
@@ -396,7 +410,8 @@ pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTre
             | st::ExpressionKind::Integer { .. }
             | st::ExpressionKind::ParenthesizedExpression { .. }
             | st::ExpressionKind::Call { .. }
-            | st::ExpressionKind::Constructor { .. } => {
+            | st::ExpressionKind::Constructor { .. }
+            | st::ExpressionKind::MemberAccess { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedType,
