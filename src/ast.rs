@@ -1,4 +1,4 @@
-use crate::{interning::InternedStr, lexing::SourceLocation};
+use crate::{ids::Id, interning::InternedStr, lexing::SourceLocation};
 
 #[derive(Debug)]
 pub struct Item {
@@ -93,7 +93,8 @@ pub enum ExpressionKind {
     Place(Place),
     Constant(Constant),
     Block {
-        label: Option<InternedStr>,
+        label: Id<Label>,
+        label_name: Option<InternedStr>,
         statements: Box<[Statement]>,
         last_expression: Box<Expression>,
     },
@@ -110,11 +111,11 @@ pub enum ExpressionKind {
         arms: Box<[MatchArm]>,
     },
     Break {
-        label: InternedStr,
+        label: Label,
         value: Box<Expression>,
     },
     Continue {
-        label: InternedStr,
+        label: Label,
     },
 }
 
@@ -130,6 +131,12 @@ pub enum Place {
 #[derive(Debug)]
 pub enum Constant {
     Integer(u64),
+}
+
+#[derive(Debug)]
+pub enum Label {
+    Id(Id<Label>),
+    Name(InternedStr),
 }
 
 #[derive(Debug)]

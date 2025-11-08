@@ -87,6 +87,8 @@ pub enum TokenKind {
     BreakKeyword,
     #[display("continue keyword")]
     ContinueKeyword,
+    #[display("while keyword")]
+    WhileKeyword,
 
     #[display("'{_0}")]
     Lifetime(InternedStr),
@@ -287,6 +289,7 @@ impl<'source> Lexer<'source> {
                             "const" => TokenKind::ConstKeyword,
                             "break" => TokenKind::BreakKeyword,
                             "continue" => TokenKind::ContinueKeyword,
+                            "while" => TokenKind::WhileKeyword,
                             name => TokenKind::Name(name.into()),
                         }
                     }

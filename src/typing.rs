@@ -257,6 +257,7 @@ struct Typer<'ast> {
 struct Names<'ast> {
     variables_and_types: FxHashMap<InternedStr, Id<Binding<'ast>>>,
     labels: FxHashMap<InternedStr, Id<tt::Label>>,
+    label_translations: IdSecondaryMap<ast::Label, Id<tt::Label>>,
 }
 
 impl<'ast> Typer<'ast> {
@@ -487,6 +488,7 @@ impl<'ast> Typer<'ast> {
                         })
                         .collect(),
                     labels: Default::default(),
+                    label_translations: Default::default(),
                 };
 
                 let mut parameter_variables = Vec::with_capacity(parameters.len());
@@ -624,13 +626,15 @@ impl<'ast> Typer<'ast> {
 
             ast::ExpressionKind::Block {
                 label,
+                label_name,
                 ref statements,
                 ref last_expression,
             } => {
                 let mut names = names.clone();
 
                 let label_id = Id::new();
-                if let Some(label) = label {
+                names.label_translations.insert(label, label_id);
+                if let Some(label) = label_name {
                     names.labels.insert(label, label_id);
                 }
 
@@ -875,39 +879,50 @@ impl<'ast> Typer<'ast> {
                 }
             }
 
-            ast::ExpressionKind::Break { label, ref value } => tt::Expression {
+            ast::ExpressionKind::Break {
+                ref label,
+                ref value,
+            } => tt::Expression {
                 location: expression.location,
                 typ: self
                     .never_type
                     .expect("the Never type should have already been defined"),
                 kind: tt::ExpressionKind::Break {
-                    label: match names.labels.get(&label) {
-                        Some(&id) => id,
-                        None => {
-                            return Err(TypingError {
-                                location: expression.location,
-                                kind: TypingErrorKind::UnknownLabel { label },
-                            });
-                        }
+                    label: match *label {
+                        ast::Label::Id(id) => names.label_translations[id],
+
+                        ast::Label::Name(label) => match names.labels.get(&label) {
+                            Some(&id) => id,
+                            None => {
+                                return Err(TypingError {
+                                    location: expression.location,
+                                    kind: TypingErrorKind::UnknownLabel { label },
+                                });
+                            }
+                        },
                     },
                     value: Box::new(self.expression(value, names, variables)?),
                 },
             },
 
-            ast::ExpressionKind::Continue { label } => tt::Expression {
+            ast::ExpressionKind::Continue { ref label } => tt::Expression {
                 location: expression.location,
                 typ: self
                     .never_type
                     .expect("the Never type should have already been defined"),
                 kind: tt::ExpressionKind::Continue {
-                    label: match names.labels.get(&label) {
-                        Some(&id) => id,
-                        None => {
-                            return Err(TypingError {
-                                location: expression.location,
-                                kind: TypingErrorKind::UnknownLabel { label },
-                            });
-                        }
+                    label: match *label {
+                        ast::Label::Id(id) => names.label_translations[id],
+
+                        ast::Label::Name(label) => match names.labels.get(&label) {
+                            Some(&id) => id,
+                            None => {
+                                return Err(TypingError {
+                                    location: expression.location,
+                                    kind: TypingErrorKind::UnknownLabel { label },
+                                });
+                            }
+                        },
                     },
                 },
             },

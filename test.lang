@@ -101,3 +101,10 @@ fn label_testing2() -> I32 'return: {
 fn label_testing3() -> Never 'loop: {
     continue 'loop
 }
+
+// doesnt compile *yet* but it will once i have finished with type inference
+/*
+fn while_loop(cond: Bool) {
+    while cond {}
+}
+*/

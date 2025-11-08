@@ -337,6 +337,7 @@ fn could_be_expression_start(kind: &TokenKind) -> bool {
             | TokenKind::MatchKeyword
             | TokenKind::BreakKeyword
             | TokenKind::ContinueKeyword
+            | TokenKind::WhileKeyword
     )
 }
 
@@ -537,6 +538,19 @@ pub fn parse_expression(
             kind: ExpressionKind::Continue {
                 continue_token,
                 lifetime_token: expect!(lexer, TokenKind::Lifetime(_))?,
+            },
+        },
+
+        while_token @ Token {
+            location,
+            kind: TokenKind::WhileKeyword,
+        } => Expression {
+            label,
+            location,
+            kind: ExpressionKind::While {
+                while_token,
+                condition: Box::new(parse_expression(lexer, false)?),
+                body: Box::new(parse_expression(lexer, true)?),
             },
         },
 

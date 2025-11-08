@@ -59,6 +59,7 @@ impl<T> Hash for Id<T> {
 // TODO: optimisation that could be done in the future
 // maybe this could be a `Vec<(Id<T>, T)>` that always gets appended to the end
 // and a binary search for looking up elements?
+#[derive(Clone)]
 pub struct IdMap<T> {
     items: FxHashMap<Id<T>, T>,
 }
@@ -202,6 +203,14 @@ impl<T, U> IndexMut<Id<T>> for IdSecondaryMap<T, U> {
             value
         } else {
             panic!("{id:?} was not found in IdSecondaryMap")
+        }
+    }
+}
+
+impl<T, U: Clone> Clone for IdSecondaryMap<T, U> {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
         }
     }
 }

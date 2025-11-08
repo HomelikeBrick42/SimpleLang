@@ -182,6 +182,11 @@ pub enum ExpressionKind {
         continue_token: Token,
         lifetime_token: Token,
     },
+    While {
+        while_token: Token,
+        condition: Box<Expression>,
+        body: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]

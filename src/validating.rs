@@ -1,5 +1,6 @@
 use crate::{
     ast,
+    ids::Id,
     interning::InternedStr,
     lexing::{SourceLocation, TokenKind},
     syntax_tree as st,
@@ -336,7 +337,10 @@ pub fn validate_expression(
     expression: &st::Expression,
 ) -> Result<ast::Expression, SyntaxTreeValidationError> {
     if let Some(ref label) = expression.label
-        && !matches!(expression.kind, st::ExpressionKind::Block { .. })
+        && !matches!(
+            expression.kind,
+            st::ExpressionKind::Block { .. } | st::ExpressionKind::While { .. }
+        )
     {
         return Err(SyntaxTreeValidationError {
             location: label.lifetime_token.location,
@@ -369,7 +373,8 @@ pub fn validate_expression(
                 };
 
                 ast::ExpressionKind::Block {
-                    label: expression.label.as_ref().map(|label| {
+                    label: Id::new(),
+                    label_name: expression.label.as_ref().map(|label| {
                         let TokenKind::Lifetime(name) = label.lifetime_token.kind else {
                             unreachable!("{:?}", label.lifetime_token)
                         };
@@ -496,64 +501,15 @@ pub fn validate_expression(
                 ref condition,
                 ref then_body,
                 ref else_body,
-            } => ast::ExpressionKind::Match {
-                scruitnee: Box::new(validate_expression(condition)?),
-                arms: Box::new([
-                    ast::MatchArm {
-                        location: if_token.location,
-                        pattern: ast::Pattern {
-                            location: if_token.location,
-                            kind: ast::PatternKind::Deconstructor {
-                                typ: Box::new(ast::Type {
-                                    location: if_token.location,
-                                    kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
-                                }),
-                                arguments: Box::new([ast::DeconstructorArgument {
-                                    location: if_token.location,
-                                    name: "true".into(),
-                                    pattern: unit_pattern(if_token.location),
-                                }]),
-                            },
-                        },
-                        value: validate_expression(then_body)?,
-                    },
-                    if let Some(else_body) = else_body {
-                        ast::MatchArm {
-                            location: else_body.else_token.location,
-                            pattern: ast::Pattern {
-                                location: else_body.else_token.location,
-                                kind: ast::PatternKind::Deconstructor {
-                                    typ: Box::new(ast::Type {
-                                        location: else_body.else_token.location,
-                                        kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
-                                    }),
-                                    arguments: Box::new([ast::DeconstructorArgument {
-                                        location: else_body.else_token.location,
-                                        name: "false".into(),
-                                        pattern: unit_pattern(else_body.else_token.location),
-                                    }]),
-                                },
-                            },
-                            value: validate_expression(&else_body.else_block)?,
-                        }
-                    } else {
-                        ast::MatchArm {
-                            location: if_token.location,
-                            pattern: ast::Pattern {
-                                location: if_token.location,
-                                kind: ast::PatternKind::Deconstructor {
-                                    typ: Box::new(ast::Type {
-                                        location: if_token.location,
-                                        kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
-                                    }),
-                                    arguments: Box::new([]),
-                                },
-                            },
-                            value: unit_expression(if_token.location),
-                        }
-                    },
-                ]),
-            },
+            } => if_expression(
+                validate_expression(condition)?,
+                validate_expression(then_body)?,
+                if let Some(else_body) = else_body {
+                    validate_expression(&else_body.else_block)?
+                } else {
+                    unit_expression(if_token.location)
+                },
+            ),
 
             st::ExpressionKind::Break {
                 ref break_token,
@@ -564,7 +520,7 @@ pub fn validate_expression(
                     let TokenKind::Lifetime(name) = lifetime_token.kind else {
                         unreachable!("{lifetime_token:?}")
                     };
-                    name
+                    ast::Label::Name(name)
                 },
                 value: if let Some(value) = value {
                     Box::new(validate_expression(value)?)
@@ -581,9 +537,41 @@ pub fn validate_expression(
                     let TokenKind::Lifetime(name) = lifetime_token.kind else {
                         unreachable!("{lifetime_token:?}")
                     };
-                    name
+                    ast::Label::Name(name)
                 },
             },
+
+            st::ExpressionKind::While {
+                ref while_token,
+                ref condition,
+                ref body,
+            } => {
+                let label = Id::new();
+                ast::ExpressionKind::Block {
+                    label,
+                    label_name: expression.label.as_ref().map(|label| {
+                        let TokenKind::Lifetime(name) = label.lifetime_token.kind else {
+                            unreachable!("{:?}", label.lifetime_token)
+                        };
+                        name
+                    }),
+                    statements: Box::new([]),
+                    last_expression: Box::new(ast::Expression {
+                        location: while_token.location,
+                        kind: if_expression(
+                            validate_expression(condition)?,
+                            validate_expression(body)?,
+                            ast::Expression {
+                                location: while_token.location,
+                                kind: ast::ExpressionKind::Break {
+                                    label: ast::Label::Id(label),
+                                    value: Box::new(unit_expression(while_token.location)),
+                                },
+                            },
+                        ),
+                    }),
+                }
+            }
 
             st::ExpressionKind::Discard { .. } | st::ExpressionKind::Let { .. } => {
                 return Err(SyntaxTreeValidationError {
@@ -593,6 +581,54 @@ pub fn validate_expression(
             }
         },
     })
+}
+
+fn if_expression(
+    condition: ast::Expression,
+    then_body: ast::Expression,
+    else_body: ast::Expression,
+) -> ast::ExpressionKind {
+    ast::ExpressionKind::Match {
+        scruitnee: Box::new(condition),
+        arms: Box::new([
+            ast::MatchArm {
+                location: then_body.location,
+                pattern: ast::Pattern {
+                    location: then_body.location,
+                    kind: ast::PatternKind::Deconstructor {
+                        typ: Box::new(ast::Type {
+                            location: then_body.location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
+                        }),
+                        arguments: Box::new([ast::DeconstructorArgument {
+                            location: then_body.location,
+                            name: "true".into(),
+                            pattern: unit_pattern(then_body.location),
+                        }]),
+                    },
+                },
+                value: then_body,
+            },
+            ast::MatchArm {
+                location: else_body.location,
+                pattern: ast::Pattern {
+                    location: else_body.location,
+                    kind: ast::PatternKind::Deconstructor {
+                        typ: Box::new(ast::Type {
+                            location: else_body.location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::Bool),
+                        }),
+                        arguments: Box::new([ast::DeconstructorArgument {
+                            location: else_body.location,
+                            name: "false".into(),
+                            pattern: unit_pattern(else_body.location),
+                        }]),
+                    },
+                },
+                value: else_body,
+            },
+        ]),
+    }
 }
 
 fn unit_expression(location: SourceLocation) -> ast::Expression {
@@ -641,7 +677,8 @@ pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTre
             | st::ExpressionKind::Match { .. }
             | st::ExpressionKind::If { .. }
             | st::ExpressionKind::Break { .. }
-            | st::ExpressionKind::Continue { .. } => {
+            | st::ExpressionKind::Continue { .. }
+            | st::ExpressionKind::While { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedType,
@@ -751,7 +788,8 @@ pub fn validate_pattern(
             | st::ExpressionKind::Match { .. }
             | st::ExpressionKind::If { .. }
             | st::ExpressionKind::Break { .. }
-            | st::ExpressionKind::Continue { .. } => {
+            | st::ExpressionKind::Continue { .. }
+            | st::ExpressionKind::While { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: pattern.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedPattern,
