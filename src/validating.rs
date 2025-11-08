@@ -16,10 +16,12 @@ pub struct SyntaxTreeValidationError {
 
 #[derive(Debug, Display, Clone)]
 pub enum SyntaxTreeValidationErrorKind {
-    #[display("Expected a type")]
-    ExpectedType,
     #[display("Expected a value")]
     ExpectedValue,
+    #[display("Expected a type")]
+    ExpectedType,
+    #[display("Expected a pattern")]
+    ExpectedPattern,
     #[display("Cannot have multiple builtin attributes on the same item")]
     MultipleBuiltinAttributes,
     #[display("Unknown builtin {_0:?}")]
@@ -260,6 +262,15 @@ pub fn validate_statement(
             st::StatementKind::Expression(ref expression) => {
                 ast::StatementKind::Expression(Box::new(validate_expression(expression)?))
             }
+
+            st::StatementKind::Assignment {
+                ref pattern,
+                equals_token: _,
+                ref value,
+            } => ast::StatementKind::Assignment {
+                pattern: Box::new(validate_pattern(pattern)?),
+                value: Box::new(validate_expression(value)?),
+            },
         },
     })
 }
@@ -314,7 +325,7 @@ pub fn validate_expression(
             }),
 
             st::ExpressionKind::Path(ref path) => {
-                ast::ExpressionKind::Path(Box::new(validate_path(path)?))
+                ast::ExpressionKind::Place(ast::Place::Path(Box::new(validate_path(path)?)))
             }
 
             st::ExpressionKind::ParenthesizedExpression {
@@ -372,18 +383,11 @@ pub fn validate_expression(
                     .collect::<Result<Box<[_]>, _>>()?,
             },
 
-            st::ExpressionKind::Discard { discard_token: _ } => {
-                return Err(SyntaxTreeValidationError {
-                    location: expression.location,
-                    kind: SyntaxTreeValidationErrorKind::ExpectedValue,
-                });
-            }
-
             st::ExpressionKind::MemberAccess {
                 ref operand,
                 dot_token: _,
                 ref name_token,
-            } => ast::ExpressionKind::MemberAccess {
+            } => ast::ExpressionKind::Place(ast::Place::MemberAccess {
                 operand: Box::new(validate_expression(operand)?),
                 member_name: {
                     let TokenKind::Name(name) = name_token.kind else {
@@ -391,7 +395,14 @@ pub fn validate_expression(
                     };
                     name
                 },
-            },
+            }),
+
+            st::ExpressionKind::Discard { .. } | st::ExpressionKind::Let { .. } => {
+                return Err(SyntaxTreeValidationError {
+                    location: expression.location,
+                    kind: SyntaxTreeValidationErrorKind::ExpectedValue,
+                });
+            }
         },
     })
 }
@@ -411,10 +422,114 @@ pub fn validate_type(expression: &st::Expression) -> Result<ast::Type, SyntaxTre
             | st::ExpressionKind::ParenthesizedExpression { .. }
             | st::ExpressionKind::Call { .. }
             | st::ExpressionKind::Constructor { .. }
-            | st::ExpressionKind::MemberAccess { .. } => {
+            | st::ExpressionKind::MemberAccess { .. }
+            | st::ExpressionKind::Let { .. } => {
                 return Err(SyntaxTreeValidationError {
                     location: expression.location,
                     kind: SyntaxTreeValidationErrorKind::ExpectedType,
+                });
+            }
+        },
+    })
+}
+
+pub fn validate_pattern(
+    pattern: &st::Expression,
+) -> Result<ast::Pattern, SyntaxTreeValidationError> {
+    Ok(ast::Pattern {
+        location: pattern.location,
+        kind: match pattern.kind {
+            st::ExpressionKind::Discard { discard_token: _ } => ast::PatternKind::Discard,
+
+            st::ExpressionKind::Path(ref path) => {
+                ast::PatternKind::Place(ast::Place::Path(Box::new(validate_path(path)?)))
+            }
+
+            st::ExpressionKind::Integer { ref integer_token } => ast::PatternKind::Integer({
+                let TokenKind::Integer(value) = integer_token.kind else {
+                    unreachable!("{integer_token:?}")
+                };
+                value
+            }),
+
+            st::ExpressionKind::ParenthesizedExpression {
+                open_parenthesis_token: _,
+                ref expression,
+                close_parenthesis_token: _,
+            } => return validate_pattern(expression),
+
+            st::ExpressionKind::Constructor {
+                ref typ,
+                arguments:
+                    st::ConstructorArguments {
+                        open_brace_token: _,
+                        ref arguments,
+                        close_brace_token: _,
+                    },
+            } => ast::PatternKind::Destructor {
+                typ: Box::new(validate_type(typ)?),
+                arguments: arguments
+                    .iter()
+                    .map(
+                        |st::ConstructorArgument {
+                             name_token,
+                             colon_token: _,
+                             value,
+                         }| {
+                            Ok(ast::DestructorArgument {
+                                location: name_token.location,
+                                name: {
+                                    let TokenKind::Name(name) = name_token.kind else {
+                                        unreachable!("{name_token:?}")
+                                    };
+                                    name
+                                },
+                                pattern: validate_pattern(value)?,
+                            })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?,
+            },
+
+            st::ExpressionKind::MemberAccess {
+                ref operand,
+                dot_token: _,
+                ref name_token,
+            } => ast::PatternKind::MemberAccess {
+                operand: Box::new(validate_expression(operand)?),
+                member_name: {
+                    let TokenKind::Name(name) = name_token.kind else {
+                        unreachable!("{name_token:?}")
+                    };
+                    name
+                },
+            },
+
+            st::ExpressionKind::Let {
+                ref let_token,
+                ref name_token,
+                ref typ,
+            } => ast::PatternKind::Let {
+                name: {
+                    let TokenKind::Name(name) = name_token.kind else {
+                        unreachable!("{name_token:?}")
+                    };
+                    name
+                },
+                typ: Box::new(if let Some(typ) = typ {
+                    validate_type(&typ.typ)?
+                } else {
+                    ast::Type {
+                        location: let_token.location,
+                        kind: ast::TypeKind::Infer,
+                    }
+                }),
+            },
+
+            st::ExpressionKind::Block { .. } | st::ExpressionKind::Call { .. } => {
+                return Err(SyntaxTreeValidationError {
+                    location: pattern.location,
+                    kind: SyntaxTreeValidationErrorKind::ExpectedPattern,
                 });
             }
         },

@@ -183,6 +183,28 @@ impl<T, U> IdSecondaryMap<T, U> {
     }
 }
 
+impl<T, U> Index<Id<T>> for IdSecondaryMap<T, U> {
+    type Output = U;
+
+    fn index(&self, id: Id<T>) -> &Self::Output {
+        if let Some(value) = self.get(id) {
+            value
+        } else {
+            panic!("{id:?} was not found in IdSecondaryMap")
+        }
+    }
+}
+
+impl<T, U> IndexMut<Id<T>> for IdSecondaryMap<T, U> {
+    fn index_mut(&mut self, id: Id<T>) -> &mut Self::Output {
+        if let Some(value) = self.get_mut(id) {
+            value
+        } else {
+            panic!("{id:?} was not found in IdSecondaryMap")
+        }
+    }
+}
+
 impl<T, U> Default for IdSecondaryMap<T, U> {
     fn default() -> Self {
         Self::new()

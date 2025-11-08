@@ -65,6 +65,12 @@ pub struct EqualsType {
 }
 
 #[derive(Debug)]
+pub struct ColonType {
+    pub colon_token: Token,
+    pub typ: Expression,
+}
+
+#[derive(Debug)]
 pub struct FunctionParameters {
     pub open_parenthesis_token: Token,
     pub parameters: Box<[FunctionParameter]>,
@@ -94,6 +100,11 @@ pub struct Statement {
 pub enum StatementKind {
     Item(Box<Item>),
     Expression(Box<Expression>),
+    Assignment {
+        pattern: Box<Expression>,
+        equals_token: Token,
+        value: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]
@@ -133,6 +144,11 @@ pub enum ExpressionKind {
         operand: Box<Expression>,
         dot_token: Token,
         name_token: Token,
+    },
+    Let {
+        let_token: Token,
+        name_token: Token,
+        typ: Option<Box<ColonType>>,
     },
 }
 

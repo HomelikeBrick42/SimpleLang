@@ -15,6 +15,13 @@ fn main(runtime: Runtime) {
     print_i32(5, runtime)
     print_i32(10, runtime)
 
+/*
+    let foo = Foo {
+        member: {}, // shorter way to construct the Unit type, just make the compiler do it for you
+    }
+
+    foo.member
+*/
     Foo {
         member: {}, // shorter way to construct the Unit type, just make the compiler do it for you
     }.member

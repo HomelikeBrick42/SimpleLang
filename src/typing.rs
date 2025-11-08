@@ -84,7 +84,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
     let mut function_bodies = IdSecondaryMap::new();
 
     if errors.is_empty() {
-        'body_loop: while let Some(UnresolvedFunctionBody {
+        while let Some(UnresolvedFunctionBody {
             id,
             body,
             names,
@@ -92,31 +92,30 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
             parameters,
         }) = typer.unresolved_function_bodies.pop_front()
         {
-            let error = 'error: {
-                function_bodies.insert(
-                    id,
-                    match body {
-                        ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
-                            expression: Box::new(
-                                match typer.expression(expression, &names, &mut variables) {
-                                    Ok(expression) => expression,
-                                    Err(error) => break 'error error,
-                                },
-                            ),
-                            variables,
-                            parameters,
-                        },
-
-                        ast::FunctionBody::Builtin(builtin_function) => {
-                            tt::FunctionBody::Builtin(match builtin_function {
-                                ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
-                            })
-                        }
+            function_bodies.insert(
+                id,
+                match body {
+                    ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
+                        expression: Box::new(
+                            match typer.expression(expression, &names, &mut variables) {
+                                Ok(expression) => expression,
+                                Err(error) => {
+                                    errors.push(error);
+                                    continue;
+                                }
+                            },
+                        ),
+                        variables,
+                        parameters,
                     },
-                );
-                continue 'body_loop;
-            };
-            errors.push(error);
+
+                    ast::FunctionBody::Builtin(builtin_function) => {
+                        tt::FunctionBody::Builtin(match builtin_function {
+                            ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
+                        })
+                    }
+                },
+            );
         }
     }
 
@@ -475,6 +474,8 @@ impl<'ast> Typer<'ast> {
                             self.expression(expression, names, variables)?,
                         )))
                     }
+
+                    ast::StatementKind::Assignment { .. } => todo!(),
                 })
             })
             .filter_map(|result| result.transpose())
@@ -488,33 +489,65 @@ impl<'ast> Typer<'ast> {
         variables: &mut IdMap<tt::Variable>,
     ) -> Result<tt::Expression, TypingError> {
         Ok(match expression.kind {
-            ast::ExpressionKind::Path(ref path) => match self.path(path, names)? {
-                ResolvedBinding {
-                    location: _,
-                    kind: ResolvedBindingKind::Function(id),
-                } => tt::Expression {
-                    location: expression.location,
-                    typ: self.functions[id].typ,
-                    kind: tt::ExpressionKind::Function(id),
+            ast::ExpressionKind::Place(ref place) => match *place {
+                ast::Place::Path(ref path) => match self.path(path, names)? {
+                    ResolvedBinding {
+                        location: _,
+                        kind: ResolvedBindingKind::Function(id),
+                    } => tt::Expression {
+                        location: expression.location,
+                        typ: self.functions[id].typ,
+                        kind: tt::ExpressionKind::Place(tt::Place::Function(id)),
+                    },
+
+                    ResolvedBinding {
+                        location: _,
+                        kind: ResolvedBindingKind::Variable(id),
+                    } => tt::Expression {
+                        location: expression.location,
+                        typ: variables[id].typ,
+                        kind: tt::ExpressionKind::Place(tt::Place::Variable(id)),
+                    },
+
+                    ResolvedBinding {
+                        location: declared_location,
+                        kind: _,
+                    } => {
+                        return Err(TypingError {
+                            location: path.location,
+                            kind: TypingErrorKind::ExpectedValue { declared_location },
+                        });
+                    }
                 },
 
-                ResolvedBinding {
-                    location: _,
-                    kind: ResolvedBindingKind::Variable(id),
-                } => tt::Expression {
-                    location: expression.location,
-                    typ: variables[id].typ,
-                    kind: tt::ExpressionKind::Variable(id),
-                },
-
-                ResolvedBinding {
-                    location: declared_location,
-                    kind: _,
+                ast::Place::MemberAccess {
+                    ref operand,
+                    member_name,
                 } => {
-                    return Err(TypingError {
-                        location: path.location,
-                        kind: TypingErrorKind::ExpectedValue { declared_location },
-                    });
+                    let operand = Box::new(self.expression(operand, names, variables)?);
+                    let tt::TypeKind::Struct { ref members } = self.types[operand.typ].kind else {
+                        return Err(TypingError {
+                            location: operand.location,
+                            kind: TypingErrorKind::ExpectedStructTypeButGot { got: operand.typ },
+                        });
+                    };
+
+                    let member_index = members
+                        .iter()
+                        .position(|member| member.name == member_name)
+                        .ok_or(TypingError {
+                            location: expression.location,
+                            kind: TypingErrorKind::UnknownName { name: member_name },
+                        })?;
+
+                    tt::Expression {
+                        location: expression.location,
+                        typ: members[member_index].typ,
+                        kind: tt::ExpressionKind::Place(tt::Place::StructMemberAccess {
+                            operand,
+                            member_index,
+                        }),
+                    }
                 }
             },
 
@@ -670,36 +703,6 @@ impl<'ast> Typer<'ast> {
                     location: expression.location,
                     typ,
                     kind: tt::ExpressionKind::StructConstructor { arguments },
-                }
-            }
-
-            ast::ExpressionKind::MemberAccess {
-                ref operand,
-                member_name,
-            } => {
-                let operand = Box::new(self.expression(operand, names, variables)?);
-                let tt::TypeKind::Struct { ref members } = self.types[operand.typ].kind else {
-                    return Err(TypingError {
-                        location: operand.location,
-                        kind: TypingErrorKind::ExpectedStructTypeButGot { got: operand.typ },
-                    });
-                };
-
-                let member_index = members
-                    .iter()
-                    .position(|member| member.name == member_name)
-                    .ok_or(TypingError {
-                        location: expression.location,
-                        kind: TypingErrorKind::UnknownName { name: member_name },
-                    })?;
-
-                tt::Expression {
-                    location: expression.location,
-                    typ: members[member_index].typ,
-                    kind: tt::ExpressionKind::StructMemberAccess {
-                        operand,
-                        member_index,
-                    },
                 }
             }
         })

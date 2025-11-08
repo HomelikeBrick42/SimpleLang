@@ -69,8 +69,7 @@ pub struct Expression {
 
 #[derive(Debug)]
 pub enum ExpressionKind {
-    Variable(Id<Variable>),
-    Function(Id<Function>),
+    Place(Place),
     Integer(u64),
     Block {
         statements: Box<[Statement]>,
@@ -83,6 +82,12 @@ pub enum ExpressionKind {
     StructConstructor {
         arguments: Box<[StructConstructorArgument]>,
     },
+}
+
+#[derive(Debug)]
+pub enum Place {
+    Variable(Id<Variable>),
+    Function(Id<Function>),
     StructMemberAccess {
         operand: Box<Expression>,
         member_index: usize,
@@ -91,6 +96,34 @@ pub enum ExpressionKind {
 
 #[derive(Debug)]
 pub struct StructConstructorArgument {
+    pub member_index: usize,
+    pub value: Expression,
+}
+
+#[derive(Debug)]
+pub struct Pattern {
+    pub location: SourceLocation,
+    pub typ: Id<Type>,
+    pub kind: PatternKind,
+}
+
+#[derive(Debug)]
+pub enum PatternKind {
+    Discard,
+    Place(Place),
+    Integer(u64),
+    StructDestructor {
+        typ: Box<Type>,
+        arguments: Box<[StructDestructorArgument]>,
+    },
+    Let {
+        name: InternedStr,
+        typ: Box<Type>,
+    },
+}
+
+#[derive(Debug)]
+pub struct StructDestructorArgument {
     pub member_index: usize,
     pub value: Expression,
 }

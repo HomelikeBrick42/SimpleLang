@@ -65,6 +65,10 @@ pub struct Statement {
 pub enum StatementKind {
     Item(Box<Item>),
     Expression(Box<Expression>),
+    Assignment {
+        pattern: Box<Pattern>,
+        value: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]
@@ -75,7 +79,7 @@ pub struct Expression {
 
 #[derive(Debug)]
 pub enum ExpressionKind {
-    Path(Box<Path>),
+    Place(Place),
     Integer(u64),
     Block {
         statements: Box<[Statement]>,
@@ -89,6 +93,11 @@ pub enum ExpressionKind {
         typ: Box<Type>,
         arguments: Box<[ConstructorArgument]>,
     },
+}
+
+#[derive(Debug)]
+pub enum Place {
+    Path(Box<Path>),
     MemberAccess {
         operand: Box<Expression>,
         member_name: InternedStr,
@@ -120,6 +129,38 @@ pub enum BuiltinType {
     Unit,
     I32,
     Runtime,
+}
+
+#[derive(Debug)]
+pub struct Pattern {
+    pub location: SourceLocation,
+    pub kind: PatternKind,
+}
+
+#[derive(Debug)]
+pub enum PatternKind {
+    Discard,
+    Place(Place),
+    Integer(u64),
+    Destructor {
+        typ: Box<Type>,
+        arguments: Box<[DestructorArgument]>,
+    },
+    MemberAccess {
+        operand: Box<Expression>,
+        member_name: InternedStr,
+    },
+    Let {
+        name: InternedStr,
+        typ: Box<Type>,
+    },
+}
+
+#[derive(Debug)]
+pub struct DestructorArgument {
+    pub location: SourceLocation,
+    pub name: InternedStr,
+    pub pattern: Pattern,
 }
 
 #[derive(Debug)]

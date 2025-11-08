@@ -2,10 +2,10 @@ use crate::{
     interning::InternedStr,
     lexing::{Lexer, LexerErrorKind, LexingError, SourceLocation, Token, TokenKind},
     syntax_tree::{
-        Attribute, AttributeKind, CallArguments, ConstructorArgument, ConstructorArguments,
-        EqualsType, Expression, ExpressionKind, FunctionParameter, FunctionParameters,
-        FunctionReturnType, Item, ItemKind, Path, Statement, StatementKind, StructMember,
-        StructMembers,
+        Attribute, AttributeKind, CallArguments, ColonType, ConstructorArgument,
+        ConstructorArguments, EqualsType, Expression, ExpressionKind, FunctionParameter,
+        FunctionParameters, FunctionReturnType, Item, ItemKind, Path, Statement, StatementKind,
+        StructMember, StructMembers,
     },
 };
 use derive_more::Display;
@@ -259,10 +259,27 @@ pub fn parse_statement(lexer: &mut Lexer) -> Result<Statement, ParsingError> {
             kind: StatementKind::Item(Box::new(parse_item(lexer)?)),
         },
 
-        Token { location, .. } => Statement {
-            location,
-            kind: StatementKind::Expression(Box::new(parse_expression(lexer, true)?)),
-        },
+        Token {
+            location: start_location,
+            ..
+        } => {
+            let expression = Box::new(parse_expression(lexer, true)?);
+            if let Some(equals_token) = consume!(lexer, TokenKind::Equals) {
+                Statement {
+                    location: equals_token.location,
+                    kind: StatementKind::Assignment {
+                        pattern: expression,
+                        equals_token,
+                        value: Box::new(parse_expression(lexer, true)?),
+                    },
+                }
+            } else {
+                Statement {
+                    location: start_location,
+                    kind: StatementKind::Expression(expression),
+                }
+            }
+        }
     })
 }
 
@@ -336,6 +353,25 @@ pub fn parse_expression(
                 open_parenthesis_token,
                 expression: Box::new(parse_expression(lexer, true)?),
                 close_parenthesis_token: expect!(lexer, TokenKind::CloseParenthesis)?,
+            },
+        },
+
+        let_token @ Token {
+            location,
+            kind: TokenKind::LetKeyword,
+        } => Expression {
+            location,
+            kind: ExpressionKind::Let {
+                let_token,
+                name_token: expect!(lexer, TokenKind::Name(_))?,
+                typ: if let Some(colon_token) = consume!(lexer, TokenKind::Colon) {
+                    Some(Box::new(ColonType {
+                        colon_token,
+                        typ: parse_expression(lexer, postfix_brace_allowed)?,
+                    }))
+                } else {
+                    None
+                },
             },
         },
 
