@@ -73,8 +73,8 @@ fn bool_testing(cond: Bool) -> I32 {
 
 fn more_bool_testing(cond: Bool) -> I32 {
     if cond {
-        0
-    } else {
         1
+    } else {
+        0
     }
 }
