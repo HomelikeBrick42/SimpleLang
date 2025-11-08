@@ -10,7 +10,6 @@ pub struct Function {
     pub parameter_types: Box<[Id<Type>]>,
     pub return_type: Id<Type>,
     pub typ: Id<Type>,
-    pub body: FunctionBody,
 }
 
 #[derive(Debug)]

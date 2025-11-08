@@ -20,6 +20,20 @@ fn main(runtime: Runtime) {
     }.member
 }
 
-// below to prove that out-of-order declarations work
+// below main to prove that out-of-order declarations work
 #builtin("print_i32")
 fn print_i32(value: I32, runtime: Runtime)
+
+// recursive functions work
+fn recursive() {
+    recursive()
+}
+
+// mutually recursive functions work
+fn a() {
+    b()
+}
+
+fn b() {
+    a()
+}

@@ -1,6 +1,8 @@
+use std::collections::VecDeque;
+
 use crate::{
     ast,
-    ids::{Id, IdMap},
+    ids::{Id, IdMap, IdSecondaryMap},
     interning::InternedStr,
     lexing::SourceLocation,
     typed_tree as tt,
@@ -56,6 +58,7 @@ pub enum TypingErrorKind {
 pub struct TypingResult {
     pub types: IdMap<tt::Type>,
     pub functions: IdMap<tt::Function>,
+    pub function_bodies: IdSecondaryMap<tt::Function, tt::FunctionBody>,
     pub global_names: FxHashMap<InternedStr, GlobalBinding>,
     pub errors: Vec<TypingError>,
 }
@@ -69,6 +72,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         runtime_type: None,
 
         bindings: IdMap::new(),
+        unresolved_function_bodies: VecDeque::new(),
     };
     let mut global_names = FxHashMap::default();
     let mut errors = vec![];
@@ -77,9 +81,49 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         errors.push(error);
     }
 
+    let mut function_bodies = IdSecondaryMap::new();
+
+    if errors.is_empty() {
+        'body_loop: while let Some(UnresolvedFunctionBody {
+            id,
+            body,
+            names,
+            mut variables,
+            parameters,
+        }) = typer.unresolved_function_bodies.pop_front()
+        {
+            let error = 'error: {
+                function_bodies.insert(
+                    id,
+                    match body {
+                        ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
+                            expression: Box::new(
+                                match typer.expression(expression, &names, &mut variables) {
+                                    Ok(expression) => expression,
+                                    Err(error) => break 'error error,
+                                },
+                            ),
+                            variables,
+                            parameters,
+                        },
+
+                        ast::FunctionBody::Builtin(builtin_function) => {
+                            tt::FunctionBody::Builtin(match builtin_function {
+                                ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
+                            })
+                        }
+                    },
+                );
+                continue 'body_loop;
+            };
+            errors.push(error);
+        }
+    }
+
     TypingResult {
         types: typer.types,
         functions: typer.functions,
+        function_bodies,
         global_names: if errors.is_empty() {
             global_names
             .into_iter()
@@ -160,6 +204,14 @@ enum ResolvedBindingKind {
     Variable(Id<tt::Variable>),
 }
 
+struct UnresolvedFunctionBody<'ast> {
+    id: Id<tt::Function>,
+    body: &'ast ast::FunctionBody,
+    names: Names<'ast>,
+    variables: IdMap<tt::Variable>,
+    parameters: Box<[Id<tt::Variable>]>,
+}
+
 struct Typer<'ast> {
     types: IdMap<tt::Type>,
     functions: IdMap<tt::Function>,
@@ -168,6 +220,7 @@ struct Typer<'ast> {
     runtime_type: Option<Id<tt::Type>>,
 
     bindings: IdMap<Binding<'ast>>,
+    unresolved_function_bodies: VecDeque<UnresolvedFunctionBody<'ast>>,
 }
 
 type Names<'ast> = FxHashMap<InternedStr, Id<Binding<'ast>>>;
@@ -369,24 +422,6 @@ impl<'ast> Typer<'ast> {
 
                 let return_type = self.typ(return_type, names)?;
 
-                let body = match body {
-                    ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
-                        expression: Box::new(self.expression(
-                            expression,
-                            &local_names,
-                            &mut variables,
-                        )?),
-                        variables,
-                        parameters: parameter_variables.into_boxed_slice(),
-                    },
-
-                    ast::FunctionBody::Builtin(builtin_function) => {
-                        tt::FunctionBody::Builtin(match *builtin_function {
-                            ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
-                        })
-                    }
-                };
-
                 let id = self.functions.insert_with(|id| tt::Function {
                     location: item.location,
                     parameter_types,
@@ -395,8 +430,16 @@ impl<'ast> Typer<'ast> {
                         location: item.location,
                         kind: tt::TypeKind::FunctionItem(id),
                     }),
-                    body,
                 });
+
+                self.unresolved_function_bodies
+                    .push_back(UnresolvedFunctionBody {
+                        id,
+                        body,
+                        names: local_names,
+                        variables,
+                        parameters: parameter_variables.into_boxed_slice(),
+                    });
 
                 ResolvedBinding {
                     location: item.location,

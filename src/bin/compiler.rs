@@ -17,6 +17,7 @@ fn main() {
     let TypingResult {
         types,
         functions,
+        function_bodies,
         global_names,
         errors,
     } = type_items(&validated_items);
@@ -24,6 +25,7 @@ fn main() {
 
     println!("{types:#?}");
     println!("{functions:#?}");
+    println!("{function_bodies:#?}");
     println!("{global_names:#?}");
     if !errors.is_empty() {
         for error in errors {
