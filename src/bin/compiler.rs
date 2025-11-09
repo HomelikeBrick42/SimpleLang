@@ -60,19 +60,23 @@ fn print_infer_errors(
             InferErrorKind::ExpectedType { declared_location } => {
                 eprintln!("Expected a type but got the thing declared at {declared_location}")
             }
-            InferErrorKind::ExpectedTypeButGotType { expected, got } => eprintln!(
-                "Expected type {}, but got type {}",
-                PrettyPrintType {
-                    typ: expected,
-                    types,
-                    functions,
-                },
-                PrettyPrintType {
-                    typ: got,
-                    types,
-                    functions,
-                }
-            ),
+            InferErrorKind::ExpectedTypeButGotType { expected, got } => {
+                eprintln!(
+                    "Expected type {}, but got type {}",
+                    PrettyPrintType {
+                        typ: expected,
+                        types,
+                        functions,
+                    },
+                    PrettyPrintType {
+                        typ: got,
+                        types,
+                        functions,
+                    }
+                );
+                eprintln!("{}: Expected type declared here", types[expected].location);
+                eprintln!("{}: Got type declared here", types[got].location);
+            }
             InferErrorKind::MemberAlreadyInitialised {
                 original_location,
                 name,
