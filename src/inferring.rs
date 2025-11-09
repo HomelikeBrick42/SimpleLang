@@ -9,13 +9,13 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
-pub struct TypingError {
+pub struct InferError {
     pub location: SourceLocation,
-    pub kind: TypingErrorKind,
+    pub kind: InferErrorKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum TypingErrorKind {
+pub enum InferErrorKind {
     NameAlreadyDeclared {
         name: InternedStr,
         defined_location: SourceLocation,
@@ -53,16 +53,16 @@ pub enum TypingErrorKind {
 }
 
 #[derive(Debug)]
-pub struct TypingResult {
+pub struct InferResult {
     pub types: IdMap<it::Type>,
     pub functions: IdMap<it::Function>,
     pub function_bodies: IdSecondaryMap<it::Function, it::FunctionBody>,
     pub global_names: FxHashMap<InternedStr, GlobalBinding>,
-    pub errors: Vec<TypingError>,
+    pub errors: Vec<InferError>,
 }
 
-pub fn type_items(items: &[ast::Item]) -> TypingResult {
-    let mut typer = Typer {
+pub fn infer_items(items: &[ast::Item]) -> InferResult {
+    let mut inferrer = Inferrer {
         types: IdMap::new(),
         functions: IdMap::new(),
         unit_type: None,
@@ -78,7 +78,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
     let mut global_names = Default::default();
     let mut errors = vec![];
 
-    if let Err(error) = typer.handle_items(items.iter(), &mut global_names) {
+    if let Err(error) = inferrer.handle_items(items.iter(), &mut global_names) {
         errors.push(error);
     }
 
@@ -90,19 +90,19 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         names,
         mut variables,
         parameters,
-    }) = typer.unresolved_function_bodies.pop_front()
+    }) = inferrer.unresolved_function_bodies.pop_front()
     {
         function_bodies.insert(
             id,
             match body {
                 ast::FunctionBody::Expression(expression) => it::FunctionBody::Body {
                     expression: Box::new(
-                        match typer
+                        match inferrer
                             .expression(expression, &names, &mut variables)
                             .and_then(|expression| {
-                                typer.expect_types_equal(
+                                inferrer.expect_types_equal(
                                     expression.location,
-                                    typer.functions[id].return_type,
+                                    inferrer.functions[id].return_type,
                                     expression.typ,
                                 )?;
                                 Ok(expression)
@@ -127,18 +127,18 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         );
     }
 
-    for (id, typ) in typer.types.iter() {
+    for (id, typ) in inferrer.types.iter() {
         if matches!(typ.kind, it::TypeKind::Infer(_)) {
-            errors.push(TypingError {
+            errors.push(InferError {
                 location: typ.location,
-                kind: TypingErrorKind::UnableToInferType { typ: id },
+                kind: InferErrorKind::UnableToInferType { typ: id },
             });
         }
     }
 
-    TypingResult {
-        types: typer.types,
-        functions: typer.functions,
+    InferResult {
+        types: inferrer.types,
+        functions: inferrer.functions,
         function_bodies,
         global_names: if errors.is_empty() {
             global_names
@@ -148,8 +148,8 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
                 (
                     name,
                     GlobalBinding {
-                        location: typer.bindings[binding].location,
-                        kind: match typer.bindings[binding].kind {
+                        location: inferrer.bindings[binding].location,
+                        kind: match inferrer.bindings[binding].kind {
                             BindingKind::UnresolvedItem { item, names: _ } => {
                                 unreachable!("all bindings should have been resolved, but {item:?} wasnt")
                             }
@@ -229,7 +229,7 @@ struct UnresolvedFunctionBody<'ast> {
     parameters: Box<[Id<it::Variable>]>,
 }
 
-struct Typer<'ast> {
+struct Inferrer<'ast> {
     types: IdMap<it::Type>,
     functions: IdMap<it::Function>,
     unit_type: Option<Id<it::Type>>,
@@ -250,12 +250,12 @@ struct Names<'ast> {
     label_translations: IdSecondaryMap<ast::Label, Id<it::Label>>,
 }
 
-impl<'ast> Typer<'ast> {
+impl<'ast> Inferrer<'ast> {
     fn handle_items(
         &mut self,
         items: impl Iterator<Item = &'ast ast::Item>,
         names: &mut Names<'ast>,
-    ) -> Result<(), TypingError> {
+    ) -> Result<(), InferError> {
         let mut inserted_items = vec![];
         for item in items {
             let name = match item.kind {
@@ -316,7 +316,7 @@ impl<'ast> Typer<'ast> {
         &mut self,
         item: &'ast ast::Item,
         names: &mut Names<'ast>,
-    ) -> Result<ResolvedBinding, TypingError> {
+    ) -> Result<ResolvedBinding, InferError> {
         Ok(match item.kind {
             ast::ItemKind::Struct {
                 ref builtin,
@@ -335,9 +335,9 @@ impl<'ast> Typer<'ast> {
                              }| {
                                 if let Some(defined_location) = member_names.insert(name, location)
                                 {
-                                    return Err(TypingError {
+                                    return Err(InferError {
                                         location,
-                                        kind: TypingErrorKind::NameAlreadyDeclared {
+                                        kind: InferErrorKind::NameAlreadyDeclared {
                                             name,
                                             defined_location,
                                         },
@@ -394,9 +394,9 @@ impl<'ast> Typer<'ast> {
                              }| {
                                 if let Some(defined_location) = member_names.insert(name, location)
                                 {
-                                    return Err(TypingError {
+                                    return Err(InferError {
                                         location,
-                                        kind: TypingErrorKind::NameAlreadyDeclared {
+                                        kind: InferErrorKind::NameAlreadyDeclared {
                                             name,
                                             defined_location,
                                         },
@@ -552,7 +552,7 @@ impl<'ast> Typer<'ast> {
         statements: impl Iterator<Item = &'ast ast::Statement> + Clone,
         names: &mut Names<'ast>,
         variables: &mut IdMap<it::Variable>,
-    ) -> Result<Box<[it::Statement]>, TypingError> {
+    ) -> Result<Box<[it::Statement]>, InferError> {
         self.handle_items(
             statements
                 .clone()
@@ -594,7 +594,7 @@ impl<'ast> Typer<'ast> {
         expression: &'ast ast::Expression,
         names: &Names<'ast>,
         variables: &mut IdMap<it::Variable>,
-    ) -> Result<it::Expression, TypingError> {
+    ) -> Result<it::Expression, InferError> {
         Ok(match expression.kind {
             ast::ExpressionKind::Place(ref place) => {
                 let (place, typ) = self.place(place, expression.location, names, variables)?;
@@ -704,9 +704,9 @@ impl<'ast> Typer<'ast> {
                             let value = self.expression(value, names, variables)?;
 
                             if let Some(&original_location) = initialised_members.get(&name) {
-                                return Err(TypingError {
+                                return Err(InferError {
                                     location,
-                                    kind: TypingErrorKind::MemberAlreadyInitialised {
+                                    kind: InferErrorKind::MemberAlreadyInitialised {
                                         original_location,
                                         name,
                                     },
@@ -790,9 +790,9 @@ impl<'ast> Typer<'ast> {
                     ast::Label::Name(label) => match names.labels.get(&label) {
                         Some(&id) => id,
                         None => {
-                            return Err(TypingError {
+                            return Err(InferError {
                                 location: expression.location,
-                                kind: TypingErrorKind::UnknownLabel { label },
+                                kind: InferErrorKind::UnknownLabel { label },
                             });
                         }
                     },
@@ -825,9 +825,9 @@ impl<'ast> Typer<'ast> {
                         ast::Label::Name(label) => match names.labels.get(&label) {
                             Some(&id) => id,
                             None => {
-                                return Err(TypingError {
+                                return Err(InferError {
                                     location: expression.location,
-                                    kind: TypingErrorKind::UnknownLabel { label },
+                                    kind: InferErrorKind::UnknownLabel { label },
                                 });
                             }
                         },
@@ -843,7 +843,7 @@ impl<'ast> Typer<'ast> {
         location: SourceLocation,
         names: &Names<'ast>,
         variables: &mut IdMap<it::Variable>,
-    ) -> Result<(it::Place, Id<it::Type>), TypingError> {
+    ) -> Result<(it::Place, Id<it::Type>), InferError> {
         Ok(match *place {
             ast::Place::Path(ref path) => match self.path(path, names)? {
                 ResolvedBinding {
@@ -860,9 +860,9 @@ impl<'ast> Typer<'ast> {
                     location: declared_location,
                     kind: _,
                 } => {
-                    return Err(TypingError {
+                    return Err(InferError {
                         location: path.location,
-                        kind: TypingErrorKind::ExpectedValue { declared_location },
+                        kind: InferErrorKind::ExpectedValue { declared_location },
                     });
                 }
             },
@@ -903,7 +903,7 @@ impl<'ast> Typer<'ast> {
         location: SourceLocation,
         #[expect(unused)] names: &Names<'ast>,
         #[expect(unused)] variables: &mut IdMap<it::Variable>,
-    ) -> Result<(it::Constant, Id<it::Type>), TypingError> {
+    ) -> Result<(it::Constant, Id<it::Type>), InferError> {
         Ok(match *constant {
             ast::Constant::Integer(value) => (
                 it::Constant::Integer(value),
@@ -919,7 +919,7 @@ impl<'ast> Typer<'ast> {
         &mut self,
         typ: &'ast ast::Type,
         names: &Names<'ast>,
-    ) -> Result<Id<it::Type>, TypingError> {
+    ) -> Result<Id<it::Type>, InferError> {
         Ok(match typ.kind {
             ast::TypeKind::Infer => self.types.insert(it::Type {
                 location: typ.location,
@@ -936,9 +936,9 @@ impl<'ast> Typer<'ast> {
                     location: declared_location,
                     kind: _,
                 } => {
-                    return Err(TypingError {
+                    return Err(InferError {
                         location: path.location,
-                        kind: TypingErrorKind::ExpectedType { declared_location },
+                        kind: InferErrorKind::ExpectedType { declared_location },
                     });
                 }
             },
@@ -978,7 +978,7 @@ impl<'ast> Typer<'ast> {
         pattern: &'ast ast::Pattern,
         names: &mut Names<'ast>,
         variables: &mut IdMap<it::Variable>,
-    ) -> Result<it::Pattern, TypingError> {
+    ) -> Result<it::Pattern, InferError> {
         Ok(match pattern.kind {
             ast::PatternKind::Discard => it::Pattern {
                 location: pattern.location,
@@ -1030,9 +1030,9 @@ impl<'ast> Typer<'ast> {
                             let pattern = self.pattern(pattern, names, variables)?;
 
                             if let Some(&original_location) = initialised_members.get(&name) {
-                                return Err(TypingError {
+                                return Err(InferError {
                                     location,
-                                    kind: TypingErrorKind::MemberAlreadyDeconstructed {
+                                    kind: InferErrorKind::MemberAlreadyDeconstructed {
                                         original_location,
                                         name,
                                     },
@@ -1093,7 +1093,7 @@ impl<'ast> Typer<'ast> {
         &mut self,
         path: &'ast ast::Path,
         names: &Names<'ast>,
-    ) -> Result<ResolvedBinding, TypingError> {
+    ) -> Result<ResolvedBinding, InferError> {
         match names.variables_and_types.get(&path.name) {
             Some(&id) => match self.bindings[id].kind {
                 BindingKind::UnresolvedItem {
@@ -1116,17 +1116,17 @@ impl<'ast> Typer<'ast> {
                     Ok(resolved_binding)
                 }
 
-                BindingKind::ResolvingItem { resolving_location } => Err(TypingError {
+                BindingKind::ResolvingItem { resolving_location } => Err(InferError {
                     location: path.location,
-                    kind: TypingErrorKind::CyclicDependency { resolving_location },
+                    kind: InferErrorKind::CyclicDependency { resolving_location },
                 }),
 
                 BindingKind::Resolved(ref resolved_binding) => Ok(resolved_binding.clone()),
             },
 
-            None => Err(TypingError {
+            None => Err(InferError {
                 location: path.location,
-                kind: TypingErrorKind::UnknownName { name: path.name },
+                kind: InferErrorKind::UnknownName { name: path.name },
             }),
         }
     }
@@ -1136,7 +1136,7 @@ impl<'ast> Typer<'ast> {
         location: SourceLocation,
         expected: Id<it::Type>,
         got: Id<it::Type>,
-    ) -> Result<(), TypingError> {
+    ) -> Result<(), InferError> {
         if expected == got {
             Ok(())
         } else {
@@ -1367,9 +1367,9 @@ impl<'ast> Typer<'ast> {
                     Ok(())
                 }
 
-                _ => Err(TypingError {
+                _ => Err(InferError {
                     location,
-                    kind: TypingErrorKind::ExpectedTypeButGotType { expected, got },
+                    kind: InferErrorKind::ExpectedTypeButGotType { expected, got },
                 }),
             }
         }
