@@ -1145,7 +1145,7 @@ impl<'ast> Typer<'ast> {
                     self.expect_types_equal(location, expected, got)
                 }
                 (_, &it::TypeKind::Resolved(got)) => {
-                    self.expect_types_equal(self.types[got].location, expected, got)
+                    self.expect_types_equal(location, expected, got)
                 }
 
                 (&it::TypeKind::Infer(it::Infer::Anything), _) => {
@@ -1190,11 +1190,7 @@ impl<'ast> Typer<'ast> {
                         self.expect_types_equal(self.types[got].location, expected, got)?;
                     }
 
-                    self.expect_types_equal(
-                        self.types[got_return_type].location,
-                        expected_return_type,
-                        got_return_type,
-                    )?;
+                    self.expect_types_equal(location, expected_return_type, got_return_type)?;
 
                     self.types[got].kind = it::TypeKind::Resolved(expected);
                     Ok(())
@@ -1210,11 +1206,11 @@ impl<'ast> Typer<'ast> {
                     let parameters = parameters.clone();
 
                     for (expected, got) in function_parameters.into_iter().zip(parameters) {
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.expect_types_equal(
-                        self.types[return_type].location,
+                        location,
                         self.functions[function].return_type,
                         return_type,
                     )?;
@@ -1233,11 +1229,11 @@ impl<'ast> Typer<'ast> {
                     let parameters = parameters.clone();
 
                     for (expected, got) in function_parameters.into_iter().zip(parameters) {
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.expect_types_equal(
-                        self.functions[function].location,
+                        location,
                         return_type,
                         self.functions[function].return_type,
                     )?;
@@ -1263,7 +1259,7 @@ impl<'ast> Typer<'ast> {
                     }
                     for (&name, &got) in got_members.iter() {
                         if let Some(expected) = members.insert(name, expected) {
-                            self.expect_types_equal(self.types[got].location, expected, got)?;
+                            self.expect_types_equal(location, expected, got)?;
                         }
                     }
 
@@ -1290,7 +1286,7 @@ impl<'ast> Typer<'ast> {
                         .collect::<FxHashMap<_, _>>();
                     for (name, got) in got_members.clone() {
                         let expected = struct_members[&name];
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.types[got].kind = it::TypeKind::Resolved(expected);
@@ -1313,7 +1309,7 @@ impl<'ast> Typer<'ast> {
                         .collect::<FxHashMap<_, _>>();
                     for (name, got) in got_members.clone() {
                         let expected = struct_members[&name];
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.types[expected].kind = it::TypeKind::Resolved(got);
@@ -1337,7 +1333,7 @@ impl<'ast> Typer<'ast> {
                         .collect::<FxHashMap<_, _>>();
                     for (name, got) in got_members.clone() {
                         let expected = enum_members[&name];
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.types[got].kind = it::TypeKind::Resolved(expected);
@@ -1360,7 +1356,7 @@ impl<'ast> Typer<'ast> {
                         .collect::<FxHashMap<_, _>>();
                     for (name, got) in got_members.clone() {
                         let expected = enum_members[&name];
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.types[expected].kind = it::TypeKind::Resolved(got);
