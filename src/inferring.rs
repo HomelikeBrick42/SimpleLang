@@ -1187,7 +1187,7 @@ impl<'ast> Typer<'ast> {
                     let got_parameters = got_parameters.clone();
 
                     for (expected, got) in expected_parameters.into_iter().zip(got_parameters) {
-                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                        self.expect_types_equal(location, expected, got)?;
                     }
 
                     self.expect_types_equal(location, expected_return_type, got_return_type)?;
