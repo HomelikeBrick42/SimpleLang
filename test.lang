@@ -44,59 +44,61 @@ fn main(runtime: Runtime) {
 #builtin("print_i32")
 fn print_i32(value: I32, runtime: Runtime)
 
-// recursive functions work
-fn recursive() {
-    recursive()
-}
-
-// mutually recursive functions work
-fn a() {
-    b()
-}
-
-fn b() {
-    a()
-}
-
-struct A {}
-
-struct B {
-    a: A,
-}
-
-fn match_testing(b: B) -> A {
-    match b {
-        B { a: let c } => c,
+fn random_testing() {
+    // recursive functions work
+    fn recursive() {
+        recursive()
     }
-}
 
-fn bool_testing(cond: Bool) -> I32 {
-    match cond {
-        Bool { true: _ {} } => 1,
-        Bool { false: _ {} } => 0,
+    // mutually recursive functions work
+    fn a() {
+        b()
     }
-}
 
-fn more_bool_testing(cond: Bool) -> I32 {
-    if cond {
-        1
-    } else {
-        0
+    fn b() {
+        a()
     }
-}
 
-fn label_testing() 'return: {
-    break 'return
-}
+    struct A {}
 
-fn label_testing2() -> I32 'return: {
-    break 'return 5
-}
+    struct B {
+        a: A,
+    }
 
-fn label_testing3() -> Never 'loop: {
-    continue 'loop
-}
+    fn match_testing(b: B) -> A {
+        match b {
+            B { a: let c } => c,
+        }
+    }
 
-fn while_loop(cond: Bool) {
-    while cond {}
+    fn bool_testing(cond: Bool) -> I32 {
+        match cond {
+            Bool { true: _ {} } => 1,
+            Bool { false: _ {} } => 0,
+        }
+    }
+
+    fn more_bool_testing(cond: Bool) -> I32 {
+        if cond {
+            1
+        } else {
+            0
+        }
+    }
+
+    fn label_testing() 'return: {
+        break 'return
+    }
+
+    fn label_testing2() -> I32 'return: {
+        break 'return 5
+    }
+
+    fn label_testing3() -> Never 'loop: {
+        continue 'loop
+    }
+
+    fn while_loop(cond: Bool) {
+        while cond {}
+    }
 }
