@@ -1,7 +1,7 @@
 use simple_lang::{
     ids::{Id, IdMap},
     inferred_tree as it,
-    inferring::{TypingErrorKind, TypingResult, type_items},
+    inferring::{TypingError, TypingErrorKind, TypingResult, type_items},
     parsing::parse_file,
     validating::validate_items,
 };
@@ -25,59 +25,7 @@ fn main() {
     } = type_items(&validated_items);
     drop(validated_items);
     if !errors.is_empty() {
-        for error in errors {
-            eprint!("{}: ", error.location);
-            match error.kind {
-                TypingErrorKind::NameAlreadyDeclared {
-                    name,
-                    defined_location,
-                } => eprintln!("'{name}' was already declared at '{defined_location}'"),
-                TypingErrorKind::UnknownName { name } => eprintln!("Unknown name '{name}'"),
-                TypingErrorKind::UnknownLabel { label } => eprintln!("Unknown label '{label}"),
-                TypingErrorKind::ExpectedValue { declared_location } => {
-                    eprintln!("Expected a value but got the thing declared at {declared_location}")
-                }
-                TypingErrorKind::ExpectedType { declared_location } => {
-                    eprintln!("Expected a type but got the thing declared at {declared_location}")
-                }
-                TypingErrorKind::ExpectedTypeButGotType { expected, got } => eprintln!(
-                    "Expected type {}, but got type {}",
-                    PrettyPrintType {
-                        typ: expected,
-                        types: &types,
-                        functions: &functions
-                    },
-                    PrettyPrintType {
-                        typ: got,
-                        types: &types,
-                        functions: &functions
-                    }
-                ),
-                TypingErrorKind::MemberAlreadyInitialised {
-                    original_location,
-                    name,
-                } => {
-                    eprintln!("The '{name}' member was already initialised at {original_location}")
-                }
-                TypingErrorKind::MemberAlreadyDeconstructed {
-                    original_location,
-                    name,
-                } => eprintln!(
-                    "The '{name}' member was already deconstructed at {original_location}"
-                ),
-                TypingErrorKind::CyclicDependency { resolving_location } => {
-                    eprintln!("Found a cyclic dependency that was started at {resolving_location}")
-                }
-                TypingErrorKind::UnableToInferType { typ } => eprintln!(
-                    "Unable to infer type, only got as far as {}",
-                    PrettyPrintType {
-                        typ,
-                        types: &types,
-                        functions: &functions
-                    }
-                ),
-            }
-        }
+        print_infer_errors(&errors, &types, &functions);
         std::process::exit(1)
     }
 
@@ -90,6 +38,64 @@ fn main() {
 fn print_error_and_exit<T: std::fmt::Display, U>(error: T) -> U {
     eprintln!("{error}");
     std::process::exit(1)
+}
+
+fn print_infer_errors(
+    errors: &[TypingError],
+    types: &IdMap<it::Type>,
+    functions: &IdMap<it::Function>,
+) {
+    for error in errors {
+        eprint!("{}: ", error.location);
+        match error.kind {
+            TypingErrorKind::NameAlreadyDeclared {
+                name,
+                defined_location,
+            } => eprintln!("'{name}' was already declared at '{defined_location}'"),
+            TypingErrorKind::UnknownName { name } => eprintln!("Unknown name '{name}'"),
+            TypingErrorKind::UnknownLabel { label } => eprintln!("Unknown label '{label}"),
+            TypingErrorKind::ExpectedValue { declared_location } => {
+                eprintln!("Expected a value but got the thing declared at {declared_location}")
+            }
+            TypingErrorKind::ExpectedType { declared_location } => {
+                eprintln!("Expected a type but got the thing declared at {declared_location}")
+            }
+            TypingErrorKind::ExpectedTypeButGotType { expected, got } => eprintln!(
+                "Expected type {}, but got type {}",
+                PrettyPrintType {
+                    typ: expected,
+                    types,
+                    functions,
+                },
+                PrettyPrintType {
+                    typ: got,
+                    types,
+                    functions,
+                }
+            ),
+            TypingErrorKind::MemberAlreadyInitialised {
+                original_location,
+                name,
+            } => {
+                eprintln!("The '{name}' member was already initialised at {original_location}")
+            }
+            TypingErrorKind::MemberAlreadyDeconstructed {
+                original_location,
+                name,
+            } => eprintln!("The '{name}' member was already deconstructed at {original_location}"),
+            TypingErrorKind::CyclicDependency { resolving_location } => {
+                eprintln!("Found a cyclic dependency that was started at {resolving_location}")
+            }
+            TypingErrorKind::UnableToInferType { typ } => eprintln!(
+                "Unable to infer type, only got as far as {}",
+                PrettyPrintType {
+                    typ,
+                    types,
+                    functions,
+                }
+            ),
+        }
+    }
 }
 
 struct PrettyPrintType<'a> {
