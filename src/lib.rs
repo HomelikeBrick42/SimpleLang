@@ -1,9 +1,9 @@
 pub mod ast;
 pub mod ids;
+pub mod inferred_tree;
+pub mod inferring;
 pub mod interning;
 pub mod lexing;
 pub mod parsing;
 pub mod syntax_tree;
-pub mod typed_tree;
-pub mod typing;
 pub mod validating;

@@ -560,14 +560,26 @@ pub fn validate_expression(
                         location: while_token.location,
                         kind: if_expression(
                             validate_expression(condition)?,
-                            validate_expression(body)?,
                             ast::Expression {
                                 location: while_token.location,
-                                kind: ast::ExpressionKind::Break {
-                                    label: ast::Label::Id(label),
-                                    value: Box::new(unit_expression(while_token.location)),
+                                kind: ast::ExpressionKind::Block {
+                                    label: Id::new(),
+                                    label_name: None,
+                                    statements: Box::new([ast::Statement {
+                                        location: body.location,
+                                        kind: ast::StatementKind::Expression(Box::new(
+                                            validate_expression(body)?,
+                                        )),
+                                    }]),
+                                    last_expression: Box::new(ast::Expression {
+                                        location: while_token.location,
+                                        kind: ast::ExpressionKind::Continue {
+                                            label: ast::Label::Id(label),
+                                        },
+                                    }),
                                 },
                             },
+                            unit_expression(while_token.location),
                         ),
                     }),
                 }

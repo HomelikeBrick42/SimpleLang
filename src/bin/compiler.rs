@@ -1,6 +1,6 @@
 use simple_lang::{
     parsing::parse_file,
-    typing::{TypingResult, type_items},
+    inferring::{TypingResult, type_items},
     validating::validate_items,
 };
 

@@ -1,14 +1,13 @@
-use std::collections::VecDeque;
-
 use crate::{
     ast,
     ids::{Id, IdMap, IdSecondaryMap},
+    inferred_tree as it,
     interning::InternedStr,
     lexing::SourceLocation,
-    typed_tree as tt,
 };
 use derive_more::Display;
 use rustc_hash::{FxBuildHasher, FxHashMap};
+use std::collections::VecDeque;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
@@ -31,53 +30,34 @@ pub enum TypingErrorKind {
     UnknownLabel { label: InternedStr },
     #[display("Expected a value but got thing declared at {declared_location}")]
     ExpectedValue { declared_location: SourceLocation },
+    #[display("Expected a type but got thing declared at {declared_location}")]
+    ExpectedType { declared_location: SourceLocation },
     #[display("Expected a {expected:?} but got {got:?}")]
     ExpectedTypeButGotType {
-        expected: Id<tt::Type>,
-        got: Id<tt::Type>,
+        expected: Id<it::Type>,
+        got: Id<it::Type>,
     },
-    // TODO: make this better
-    #[display("Expected a function type but got {got:?}")]
-    ExpectedFunctionTypeButGot { got: Id<tt::Type> },
-    #[display("Function has {expected} number of parameters but got {got} arguments")]
-    ExpectedUnexpectedArgumentsCount { expected: usize, got: usize },
-    #[display("The '{name}' member was not initialised")]
-    MemberLeftUninitialised { name: InternedStr },
-    #[display("The '{name}' member was not deconstructed")]
-    MemberNotDeconstructed { name: InternedStr },
     #[display("The '{name}' member has already been initialised at {original_location}")]
     MemberAlreadyInitialised {
         original_location: SourceLocation,
         name: InternedStr,
     },
-    #[display("Only one enum variant can be initialised")]
-    OnlyOneEnumVariantCanBeInitialised,
-    #[display("One enum variant must be initialised")]
-    OneEnumVariantMustBeInitialised,
     #[display("The '{name}' member has already been deconstructed at {original_location}")]
     MemberAlreadyDeconstructed {
         original_location: SourceLocation,
         name: InternedStr,
     },
-    #[display("Only one enum variant can be deconstructed")]
-    OnlyOneEnumVariantCanBeDeconstructed,
-    #[display("One enum variant must be deconstructed")]
-    OneEnumVariantMustBeDeconstructed,
-    #[display("Expected a struct type but got {got:?}")]
-    ExpectedStructTypeButGot { got: Id<tt::Type> },
-    #[display("Expected a struct or enum type but got {got:?}")]
-    ExpectedStructOrEnumTypeButGot { got: Id<tt::Type> },
-    #[display("Expected a type but got thing declared at {declared_location}")]
-    ExpectedType { declared_location: SourceLocation },
     #[display("Found a cyclic dependency that was started at {resolving_location}")]
     CyclicDependency { resolving_location: SourceLocation },
+    #[display("Unable to infer type, only got as far as {typ:?}")]
+    UnableToInferType { typ: Id<it::Type> },
 }
 
 #[derive(Debug)]
 pub struct TypingResult {
-    pub types: IdMap<tt::Type>,
-    pub functions: IdMap<tt::Function>,
-    pub function_bodies: IdSecondaryMap<tt::Function, tt::FunctionBody>,
+    pub types: IdMap<it::Type>,
+    pub functions: IdMap<it::Function>,
+    pub function_bodies: IdSecondaryMap<it::Function, it::FunctionBody>,
     pub global_names: FxHashMap<InternedStr, GlobalBinding>,
     pub errors: Vec<TypingError>,
 }
@@ -93,6 +73,7 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         bool_type: None,
 
         bindings: IdMap::new(),
+        label_types: IdSecondaryMap::new(),
         unresolved_function_bodies: VecDeque::new(),
     };
     let mut global_names = Default::default();
@@ -115,12 +96,12 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
         function_bodies.insert(
             id,
             match body {
-                ast::FunctionBody::Expression(expression) => tt::FunctionBody::Body {
+                ast::FunctionBody::Expression(expression) => it::FunctionBody::Body {
                     expression: Box::new(
                         match typer
                             .expression(expression, &names, &mut variables)
                             .and_then(|expression| {
-                                typer.expect_types(
+                                typer.expect_types_equal(
                                     expression.location,
                                     typer.functions[id].return_type,
                                     expression.typ,
@@ -139,12 +120,21 @@ pub fn type_items(items: &[ast::Item]) -> TypingResult {
                 },
 
                 ast::FunctionBody::Builtin(builtin_function) => {
-                    tt::FunctionBody::Builtin(match builtin_function {
-                        ast::BuiltinFunction::PrintI32 => tt::BuiltinFunction::PrintI32,
+                    it::FunctionBody::Builtin(match builtin_function {
+                        ast::BuiltinFunction::PrintI32 => it::BuiltinFunction::PrintI32,
                     })
                 }
             },
         );
+    }
+
+    for (id, typ) in typer.types.iter() {
+        if matches!(typ.kind, it::TypeKind::Infer(_)) {
+            errors.push(TypingError {
+                location: typ.location,
+                kind: TypingErrorKind::UnableToInferType { typ: id },
+            });
+        }
     }
 
     TypingResult {
@@ -197,8 +187,8 @@ pub struct GlobalBinding {
 
 #[derive(Debug, Clone)]
 pub enum GlobalBindingKind {
-    Type(Id<tt::Type>),
-    Function(Id<tt::Function>),
+    Type(Id<it::Type>),
+    Function(Id<it::Function>),
 }
 
 #[derive(Debug, Clone)]
@@ -227,37 +217,38 @@ struct ResolvedBinding {
 
 #[derive(Debug, Clone)]
 enum ResolvedBindingKind {
-    Type(Id<tt::Type>),
-    Function(Id<tt::Function>),
-    Variable(Id<tt::Variable>),
+    Type(Id<it::Type>),
+    Function(Id<it::Function>),
+    Variable(Id<it::Variable>),
 }
 
 struct UnresolvedFunctionBody<'ast> {
-    id: Id<tt::Function>,
+    id: Id<it::Function>,
     body: &'ast ast::FunctionBody,
     names: Names<'ast>,
-    variables: IdMap<tt::Variable>,
-    parameters: Box<[Id<tt::Variable>]>,
+    variables: IdMap<it::Variable>,
+    parameters: Box<[Id<it::Variable>]>,
 }
 
 struct Typer<'ast> {
-    types: IdMap<tt::Type>,
-    functions: IdMap<tt::Function>,
-    unit_type: Option<Id<tt::Type>>,
-    never_type: Option<Id<tt::Type>>,
-    i32_type: Option<Id<tt::Type>>,
-    runtime_type: Option<Id<tt::Type>>,
-    bool_type: Option<Id<tt::Type>>,
+    types: IdMap<it::Type>,
+    functions: IdMap<it::Function>,
+    unit_type: Option<Id<it::Type>>,
+    never_type: Option<Id<it::Type>>,
+    i32_type: Option<Id<it::Type>>,
+    runtime_type: Option<Id<it::Type>>,
+    bool_type: Option<Id<it::Type>>,
 
     bindings: IdMap<Binding<'ast>>,
+    label_types: IdSecondaryMap<it::Label, Id<it::Type>>,
     unresolved_function_bodies: VecDeque<UnresolvedFunctionBody<'ast>>,
 }
 
 #[derive(Default, Debug, Clone)]
 struct Names<'ast> {
     variables_and_types: FxHashMap<InternedStr, Id<Binding<'ast>>>,
-    labels: FxHashMap<InternedStr, Id<tt::Label>>,
-    label_translations: IdSecondaryMap<ast::Label, Id<tt::Label>>,
+    labels: FxHashMap<InternedStr, Id<it::Label>>,
+    label_translations: IdSecondaryMap<ast::Label, Id<it::Label>>,
 }
 
 impl<'ast> Typer<'ast> {
@@ -354,7 +345,7 @@ impl<'ast> Typer<'ast> {
                                     });
                                 }
 
-                                Ok(tt::Member {
+                                Ok(it::Member {
                                     location,
                                     name,
                                     typ: self.typ(typ, names)?,
@@ -364,9 +355,9 @@ impl<'ast> Typer<'ast> {
                         .collect::<Result<Box<[_]>, _>>()?
                 };
 
-                let id = self.types.insert(tt::Type {
+                let id = self.types.insert(it::Type {
                     location: item.location,
-                    kind: tt::TypeKind::Struct { members },
+                    kind: it::TypeKind::Struct { members },
                 });
 
                 if let Some(builtin) = builtin {
@@ -413,7 +404,7 @@ impl<'ast> Typer<'ast> {
                                     });
                                 }
 
-                                Ok(tt::Member {
+                                Ok(it::Member {
                                     location,
                                     name,
                                     typ: self.typ(typ, names)?,
@@ -423,9 +414,9 @@ impl<'ast> Typer<'ast> {
                         .collect::<Result<Box<[_]>, _>>()?
                 };
 
-                let id = self.types.insert(tt::Type {
+                let id = self.types.insert(it::Type {
                     location: item.location,
-                    kind: tt::TypeKind::Enum { members },
+                    kind: it::TypeKind::Enum { members },
                 });
 
                 if let Some(builtin) = builtin {
@@ -503,7 +494,7 @@ impl<'ast> Typer<'ast> {
                              ref typ,
                          }| {
                             let typ = self.typ(typ, names)?;
-                            let variable = variables.insert(tt::Variable {
+                            let variable = variables.insert(it::Variable {
                                 location,
                                 name: Some(name),
                                 typ,
@@ -529,13 +520,13 @@ impl<'ast> Typer<'ast> {
 
                 let return_type = self.typ(return_type, names)?;
 
-                let id = self.functions.insert_with(|id| tt::Function {
+                let id = self.functions.insert_with(|id| it::Function {
                     location: item.location,
                     parameter_types,
                     return_type,
-                    typ: self.types.insert(tt::Type {
+                    typ: self.types.insert(it::Type {
                         location: item.location,
-                        kind: tt::TypeKind::FunctionItem(id),
+                        kind: it::TypeKind::FunctionItem(id),
                     }),
                 });
 
@@ -560,8 +551,8 @@ impl<'ast> Typer<'ast> {
         &mut self,
         statements: impl Iterator<Item = &'ast ast::Statement> + Clone,
         names: &mut Names<'ast>,
-        variables: &mut IdMap<tt::Variable>,
-    ) -> Result<Box<[tt::Statement]>, TypingError> {
+        variables: &mut IdMap<it::Variable>,
+    ) -> Result<Box<[it::Statement]>, TypingError> {
         self.handle_items(
             statements
                 .clone()
@@ -578,7 +569,7 @@ impl<'ast> Typer<'ast> {
                     ast::StatementKind::Item(_) => None,
 
                     ast::StatementKind::Expression(ref expression) => {
-                        Some(tt::Statement::Expression(Box::new(
+                        Some(it::Statement::Expression(Box::new(
                             self.expression(expression, names, variables)?,
                         )))
                     }
@@ -589,8 +580,8 @@ impl<'ast> Typer<'ast> {
                     } => {
                         let pattern = Box::new(self.pattern(pattern, names, variables)?);
                         let value = Box::new(self.expression(value, names, variables)?);
-                        self.expect_types(statement.location, pattern.typ, value.typ)?;
-                        Some(tt::Statement::Assignment { pattern, value })
+                        self.expect_types_equal(statement.location, pattern.typ, value.typ)?;
+                        Some(it::Statement::Assignment { pattern, value })
                     }
                 })
             })
@@ -602,25 +593,25 @@ impl<'ast> Typer<'ast> {
         &mut self,
         expression: &'ast ast::Expression,
         names: &Names<'ast>,
-        variables: &mut IdMap<tt::Variable>,
-    ) -> Result<tt::Expression, TypingError> {
+        variables: &mut IdMap<it::Variable>,
+    ) -> Result<it::Expression, TypingError> {
         Ok(match expression.kind {
             ast::ExpressionKind::Place(ref place) => {
                 let (place, typ) = self.place(place, expression.location, names, variables)?;
-                tt::Expression {
+                it::Expression {
                     location: expression.location,
                     typ,
-                    kind: tt::ExpressionKind::Place(place),
+                    kind: it::ExpressionKind::Place(place),
                 }
             }
 
             ast::ExpressionKind::Constant(ref constant) => {
                 let (constant, typ) =
                     self.constant(constant, expression.location, names, variables)?;
-                tt::Expression {
+                it::Expression {
                     location: expression.location,
                     typ,
-                    kind: tt::ExpressionKind::Constant(constant),
+                    kind: it::ExpressionKind::Constant(constant),
                 }
             }
 
@@ -633,19 +624,26 @@ impl<'ast> Typer<'ast> {
                 let mut names = names.clone();
 
                 let label_id = Id::new();
+                let typ = self.types.insert(it::Type {
+                    location: expression.location,
+                    kind: it::TypeKind::Infer(it::Infer::Anything),
+                });
+                self.label_types.insert(label_id, typ);
                 names.label_translations.insert(label, label_id);
                 if let Some(label) = label_name {
                     names.labels.insert(label, label_id);
                 }
 
                 let statements = self.statements(statements.iter(), &mut names, variables)?;
+
                 let last_expression =
                     Box::new(self.expression(last_expression, &names, variables)?);
+                self.expect_types_equal(last_expression.location, typ, last_expression.typ)?;
 
-                tt::Expression {
+                it::Expression {
                     location: expression.location,
-                    typ: last_expression.typ,
-                    kind: tt::ExpressionKind::Block {
+                    typ,
+                    kind: it::ExpressionKind::Block {
                         label: label_id,
                         statements,
                         last_expression,
@@ -658,41 +656,29 @@ impl<'ast> Typer<'ast> {
                 ref arguments,
             } => {
                 let operand = Box::new(self.expression(operand, names, variables)?);
-
-                let tt::TypeKind::FunctionItem(function) = self.types[operand.typ].kind else {
-                    return Err(TypingError {
-                        location: operand.location,
-                        kind: TypingErrorKind::ExpectedFunctionTypeButGot { got: operand.typ },
-                    });
-                };
-                let function = &self.functions[function];
-                let parameter_types = function.parameter_types.clone();
-                let return_type = function.return_type;
-
-                if parameter_types.len() != arguments.len() {
-                    return Err(TypingError {
-                        location: expression.location,
-                        kind: TypingErrorKind::ExpectedUnexpectedArgumentsCount {
-                            expected: parameter_types.len(),
-                            got: arguments.len(),
-                        },
-                    });
-                }
-
                 let arguments = arguments
                     .iter()
-                    .zip(parameter_types)
-                    .map(|(expression, expected_type)| {
-                        let expression = self.expression(expression, names, variables)?;
-                        self.expect_types(expression.location, expected_type, expression.typ)?;
-                        Ok(expression)
-                    })
+                    .map(|expression| self.expression(expression, names, variables))
                     .collect::<Result<Box<[_]>, _>>()?;
 
-                tt::Expression {
+                let return_type = self.types.insert(it::Type {
+                    location: expression.location,
+                    kind: it::TypeKind::Infer(it::Infer::Anything),
+                });
+                let function_type = self.types.insert(it::Type {
+                    location: expression.location,
+                    kind: it::TypeKind::Infer(it::Infer::FunctionLike {
+                        parameters: arguments.iter().map(|argument| argument.typ).collect(),
+                        return_type,
+                    }),
+                });
+
+                self.expect_types_equal(operand.location, function_type, operand.typ)?;
+
+                it::Expression {
                     location: expression.location,
                     typ: return_type,
-                    kind: tt::ExpressionKind::Call { operand, arguments },
+                    kind: it::ExpressionKind::Call { operand, arguments },
                 }
             }
 
@@ -700,138 +686,54 @@ impl<'ast> Typer<'ast> {
                 ref typ,
                 ref arguments,
             } => {
-                let typ_location = typ.location;
                 let typ = self.typ(typ, names)?;
 
-                let arguments = match self.types[typ].kind {
-                    tt::TypeKind::Struct { ref members } => {
-                        let mut initialised_members =
-                            FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
-                                members.len(),
-                                FxBuildHasher,
-                            );
-                        let mut members_to_initialise = members
-                            .iter()
-                            .enumerate()
-                            .map(
-                                |(
-                                    index,
-                                    &tt::Member {
-                                        location,
-                                        name,
-                                        typ,
-                                    },
-                                )| (name, (location, index, typ)),
-                            )
-                            .collect::<FxHashMap<_, _>>();
+                let mut initialised_members =
+                    FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
+                        arguments.len(),
+                        FxBuildHasher,
+                    );
+                let arguments = arguments
+                    .iter()
+                    .map(
+                        |&ast::ConstructorArgument {
+                             location,
+                             name,
+                             ref value,
+                         }| {
+                            let value = self.expression(value, names, variables)?;
 
-                        let arguments = arguments
-                            .iter()
-                            .map(
-                                |&ast::ConstructorArgument {
-                                     location,
-                                     name,
-                                     ref value,
-                                 }| {
-                                    let value = self.expression(value, names, variables)?;
-
-                                    if let Some(&original_location) = initialised_members.get(&name)
-                                    {
-                                        return Err(TypingError {
-                                            location,
-                                            kind: TypingErrorKind::MemberAlreadyInitialised {
-                                                original_location,
-                                                name,
-                                            },
-                                        });
-                                    }
-                                    initialised_members.insert(name, location);
-
-                                    let Some((_, member_index, typ)) =
-                                        members_to_initialise.remove(&name)
-                                    else {
-                                        return Err(TypingError {
-                                            location,
-                                            kind: TypingErrorKind::UnknownName { name },
-                                        });
-                                    };
-
-                                    self.expect_types(value.location, typ, value.typ)?;
-
-                                    Ok(tt::ConstructorArgument {
-                                        member_index,
-                                        value,
-                                    })
-                                },
-                            )
-                            .collect::<Result<Box<[_]>, _>>()?;
-
-                        if let Some((name, (location, _, _))) =
-                            members_to_initialise.into_iter().next()
-                        {
-                            return Err(TypingError {
-                                location,
-                                kind: TypingErrorKind::MemberLeftUninitialised { name },
-                            });
-                        }
-
-                        arguments
-                    }
-
-                    tt::TypeKind::Enum { ref members } => match **arguments {
-                        [] => {
-                            return Err(TypingError {
-                                location: expression.location,
-                                kind: TypingErrorKind::OneEnumVariantMustBeInitialised,
-                            });
-                        }
-
-                        [
-                            ast::ConstructorArgument {
-                                location,
-                                name,
-                                ref value,
-                            },
-                        ] => Box::new([{
-                            let Some(member_index) =
-                                members.iter().position(|member| member.name == name)
-                            else {
+                            if let Some(&original_location) = initialised_members.get(&name) {
                                 return Err(TypingError {
                                     location,
-                                    kind: TypingErrorKind::UnknownName { name },
+                                    kind: TypingErrorKind::MemberAlreadyInitialised {
+                                        original_location,
+                                        name,
+                                    },
                                 });
-                            };
-                            let typ = members[member_index].typ;
-
-                            let value = self.expression(value, names, variables)?;
-                            self.expect_types(value.location, typ, value.typ)?;
-
-                            tt::ConstructorArgument {
-                                member_index,
-                                value,
                             }
-                        }]),
+                            initialised_members.insert(name, location);
 
-                        _ => {
-                            return Err(TypingError {
-                                location: expression.location,
-                                kind: TypingErrorKind::OnlyOneEnumVariantCanBeInitialised,
-                            });
-                        }
-                    },
+                            Ok(it::ConstructorArgument { name, value })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?;
 
-                    _ => {
-                        return Err(TypingError {
-                            location: typ_location,
-                            kind: TypingErrorKind::ExpectedStructOrEnumTypeButGot { got: typ },
-                        });
-                    }
-                };
+                let required_struct_type = self.types.insert(it::Type {
+                    location: expression.location,
+                    kind: it::TypeKind::Infer(it::Infer::StructLike {
+                        members: arguments
+                            .iter()
+                            .map(|member| (member.name, member.value.typ))
+                            .collect(),
+                    }),
+                });
+                self.expect_types_equal(expression.location, typ, required_struct_type)?;
 
-                tt::Expression {
+                it::Expression {
                     location: expression.location,
                     typ,
-                    kind: tt::ExpressionKind::Constructor { arguments },
+                    kind: it::ExpressionKind::Constructor { arguments },
                 }
             }
 
@@ -841,7 +743,11 @@ impl<'ast> Typer<'ast> {
             } => {
                 let scruitnee = Box::new(self.expression(scruitnee, names, variables)?);
 
-                let mut arms_type = None;
+                let arms_type = self.types.insert(it::Type {
+                    location: expression.location,
+                    kind: it::TypeKind::Infer(it::Infer::Anything),
+                });
+
                 let arms = arms
                     .iter()
                     .map(
@@ -853,16 +759,12 @@ impl<'ast> Typer<'ast> {
                             let mut names = names.clone();
 
                             let pattern = self.pattern(pattern, &mut names, variables)?;
-                            self.expect_types(pattern.location, scruitnee.typ, pattern.typ)?;
+                            self.expect_types_equal(pattern.location, scruitnee.typ, pattern.typ)?;
 
                             let value = self.expression(value, &names, variables)?;
-                            if let Some(arms_type) = arms_type {
-                                self.expect_types(value.location, arms_type, value.typ)?;
-                            } else {
-                                arms_type = Some(value.typ);
-                            }
+                            self.expect_types_equal(value.location, arms_type, value.typ)?;
 
-                            Ok(tt::MatchArm {
+                            Ok(it::MatchArm {
                                 location,
                                 pattern,
                                 value,
@@ -870,47 +772,53 @@ impl<'ast> Typer<'ast> {
                         },
                     )
                     .collect::<Result<Box<[_]>, _>>()?;
-                let typ = arms_type.expect("type inference is not implemented yet");
 
-                tt::Expression {
+                it::Expression {
                     location: expression.location,
-                    typ,
-                    kind: tt::ExpressionKind::Match { scruitnee, arms },
+                    typ: arms_type,
+                    kind: it::ExpressionKind::Match { scruitnee, arms },
                 }
             }
 
             ast::ExpressionKind::Break {
                 ref label,
                 ref value,
-            } => tt::Expression {
-                location: expression.location,
-                typ: self
-                    .never_type
-                    .expect("the Never type should have already been defined"),
-                kind: tt::ExpressionKind::Break {
-                    label: match *label {
-                        ast::Label::Id(id) => names.label_translations[id],
+            } => {
+                let label = match *label {
+                    ast::Label::Id(id) => names.label_translations[id],
 
-                        ast::Label::Name(label) => match names.labels.get(&label) {
-                            Some(&id) => id,
-                            None => {
-                                return Err(TypingError {
-                                    location: expression.location,
-                                    kind: TypingErrorKind::UnknownLabel { label },
-                                });
-                            }
-                        },
+                    ast::Label::Name(label) => match names.labels.get(&label) {
+                        Some(&id) => id,
+                        None => {
+                            return Err(TypingError {
+                                location: expression.location,
+                                kind: TypingErrorKind::UnknownLabel { label },
+                            });
+                        }
                     },
-                    value: Box::new(self.expression(value, names, variables)?),
-                },
-            },
+                };
+                let label_type = self.label_types[label];
 
-            ast::ExpressionKind::Continue { ref label } => tt::Expression {
+                let value = Box::new(self.expression(value, names, variables)?);
+                self.expect_types_equal(value.location, label_type, value.typ)?;
+
+                it::Expression {
+                    location: expression.location,
+                    typ: self.types.insert(it::Type {
+                        location: expression.location,
+                        kind: it::TypeKind::Infer(it::Infer::Anything),
+                    }),
+                    kind: it::ExpressionKind::Break { label, value },
+                }
+            }
+
+            ast::ExpressionKind::Continue { ref label } => it::Expression {
                 location: expression.location,
-                typ: self
-                    .never_type
-                    .expect("the Never type should have already been defined"),
-                kind: tt::ExpressionKind::Continue {
+                typ: self.types.insert(it::Type {
+                    location: expression.location,
+                    kind: it::TypeKind::Infer(it::Infer::Anything),
+                }),
+                kind: it::ExpressionKind::Continue {
                     label: match *label {
                         ast::Label::Id(id) => names.label_translations[id],
 
@@ -934,19 +842,19 @@ impl<'ast> Typer<'ast> {
         place: &'ast ast::Place,
         location: SourceLocation,
         names: &Names<'ast>,
-        variables: &mut IdMap<tt::Variable>,
-    ) -> Result<(tt::Place, Id<tt::Type>), TypingError> {
+        variables: &mut IdMap<it::Variable>,
+    ) -> Result<(it::Place, Id<it::Type>), TypingError> {
         Ok(match *place {
             ast::Place::Path(ref path) => match self.path(path, names)? {
                 ResolvedBinding {
                     location: _,
                     kind: ResolvedBindingKind::Function(id),
-                } => (tt::Place::Function(id), self.functions[id].typ),
+                } => (it::Place::Function(id), self.functions[id].typ),
 
                 ResolvedBinding {
                     location: _,
                     kind: ResolvedBindingKind::Variable(id),
-                } => (tt::Place::Variable(id), variables[id].typ),
+                } => (it::Place::Variable(id), variables[id].typ),
 
                 ResolvedBinding {
                     location: declared_location,
@@ -964,27 +872,26 @@ impl<'ast> Typer<'ast> {
                 member_name,
             } => {
                 let operand = Box::new(self.expression(operand, names, variables)?);
-                let tt::TypeKind::Struct { ref members } = self.types[operand.typ].kind else {
-                    return Err(TypingError {
-                        location: operand.location,
-                        kind: TypingErrorKind::ExpectedStructTypeButGot { got: operand.typ },
-                    });
-                };
 
-                let member_index = members
-                    .iter()
-                    .position(|member| member.name == member_name)
-                    .ok_or(TypingError {
-                        location,
-                        kind: TypingErrorKind::UnknownName { name: member_name },
-                    })?;
+                let member_type = self.types.insert(it::Type {
+                    location,
+                    kind: it::TypeKind::Infer(it::Infer::Anything),
+                });
+                let struct_type = self.types.insert(it::Type {
+                    location,
+                    kind: it::TypeKind::Infer(it::Infer::StructLike {
+                        members: [(member_name, member_type)].into_iter().collect(),
+                    }),
+                });
+
+                self.expect_types_equal(operand.location, struct_type, operand.typ)?;
 
                 (
-                    tt::Place::StructMemberAccess {
+                    it::Place::MemberAccess {
                         operand,
-                        member_index,
+                        member_name,
                     },
-                    members[member_index].typ,
+                    member_type,
                 )
             }
         })
@@ -993,15 +900,17 @@ impl<'ast> Typer<'ast> {
     fn constant(
         &mut self,
         constant: &ast::Constant,
-        #[expect(unused)] location: SourceLocation,
+        location: SourceLocation,
         #[expect(unused)] names: &Names<'ast>,
-        #[expect(unused)] variables: &mut IdMap<tt::Variable>,
-    ) -> Result<(tt::Constant, Id<tt::Type>), TypingError> {
+        #[expect(unused)] variables: &mut IdMap<it::Variable>,
+    ) -> Result<(it::Constant, Id<it::Type>), TypingError> {
         Ok(match *constant {
             ast::Constant::Integer(value) => (
-                tt::Constant::Integer(value),
-                self.i32_type
-                    .expect("the I32 type should have already been defined"),
+                it::Constant::Integer(value),
+                self.types.insert(it::Type {
+                    location,
+                    kind: it::TypeKind::Infer(it::Infer::NumberLike),
+                }),
             ),
         })
     }
@@ -1010,11 +919,12 @@ impl<'ast> Typer<'ast> {
         &mut self,
         typ: &'ast ast::Type,
         names: &Names<'ast>,
-    ) -> Result<Id<tt::Type>, TypingError> {
+    ) -> Result<Id<it::Type>, TypingError> {
         Ok(match typ.kind {
-            ast::TypeKind::Infer => {
-                panic!("{}: type inference is not implemented yet", typ.location)
-            }
+            ast::TypeKind::Infer => self.types.insert(it::Type {
+                location: typ.location,
+                kind: it::TypeKind::Infer(it::Infer::Anything),
+            }),
 
             ast::TypeKind::Path(ref path) => match self.path(path, names)? {
                 ResolvedBinding {
@@ -1043,16 +953,16 @@ impl<'ast> Typer<'ast> {
                     .expect("Never type should have already been declared with #builtin"),
 
                 ast::BuiltinType::I32 => *self.i32_type.get_or_insert_with(|| {
-                    self.types.insert(tt::Type {
+                    self.types.insert(it::Type {
                         location: typ.location,
-                        kind: tt::TypeKind::I32,
+                        kind: it::TypeKind::I32,
                     })
                 }),
 
                 ast::BuiltinType::Runtime => *self.runtime_type.get_or_insert_with(|| {
-                    self.types.insert(tt::Type {
+                    self.types.insert(it::Type {
                         location: typ.location,
-                        kind: tt::TypeKind::Runtime,
+                        kind: it::TypeKind::Runtime,
                     })
                 }),
 
@@ -1067,30 +977,34 @@ impl<'ast> Typer<'ast> {
         &mut self,
         pattern: &'ast ast::Pattern,
         names: &mut Names<'ast>,
-        variables: &mut IdMap<tt::Variable>,
-    ) -> Result<tt::Pattern, TypingError> {
+        variables: &mut IdMap<it::Variable>,
+    ) -> Result<it::Pattern, TypingError> {
         Ok(match pattern.kind {
-            ast::PatternKind::Discard => panic!(
-                "{}: type inference is not implemented yet",
-                pattern.location
-            ),
+            ast::PatternKind::Discard => it::Pattern {
+                location: pattern.location,
+                typ: self.types.insert(it::Type {
+                    location: pattern.location,
+                    kind: it::TypeKind::Infer(it::Infer::Anything),
+                }),
+                kind: it::PatternKind::Discard,
+            },
 
             ast::PatternKind::Place(ref place) => {
                 let (place, typ) = self.place(place, pattern.location, names, variables)?;
-                tt::Pattern {
+                it::Pattern {
                     location: pattern.location,
                     typ,
-                    kind: tt::PatternKind::Place(place),
+                    kind: it::PatternKind::Place(place),
                 }
             }
 
             ast::PatternKind::Constant(ref constant) => {
                 let (constant, typ) =
                     self.constant(constant, pattern.location, names, variables)?;
-                tt::Pattern {
+                it::Pattern {
                     location: pattern.location,
                     typ,
-                    kind: tt::PatternKind::Constant(constant),
+                    kind: it::PatternKind::Constant(constant),
                 }
             }
 
@@ -1098,144 +1012,60 @@ impl<'ast> Typer<'ast> {
                 ref typ,
                 ref arguments,
             } => {
-                let typ_location = typ.location;
                 let typ = self.typ(typ, names)?;
 
-                let arguments = match self.types[typ].kind {
-                    tt::TypeKind::Struct { ref members } => {
-                        let mut initialised_members =
-                            FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
-                                members.len(),
-                                FxBuildHasher,
-                            );
-                        let mut members_to_initialise = members
-                            .iter()
-                            .enumerate()
-                            .map(
-                                |(
-                                    index,
-                                    &tt::Member {
-                                        location,
-                                        name,
-                                        typ,
-                                    },
-                                )| (name, (location, index, typ)),
-                            )
-                            .collect::<FxHashMap<_, _>>();
+                let mut initialised_members =
+                    FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
+                        arguments.len(),
+                        FxBuildHasher,
+                    );
+                let arguments = arguments
+                    .iter()
+                    .map(
+                        |&ast::DeconstructorArgument {
+                             location,
+                             name,
+                             ref pattern,
+                         }| {
+                            let pattern = self.pattern(pattern, names, variables)?;
 
-                        let arguments = arguments
-                            .iter()
-                            .map(
-                                |&ast::DeconstructorArgument {
-                                     location,
-                                     name,
-                                     ref pattern,
-                                 }| {
-                                    let pattern = self.pattern(pattern, names, variables)?;
-
-                                    if let Some(&original_location) = initialised_members.get(&name)
-                                    {
-                                        return Err(TypingError {
-                                            location,
-                                            kind: TypingErrorKind::MemberAlreadyDeconstructed {
-                                                original_location,
-                                                name,
-                                            },
-                                        });
-                                    }
-                                    initialised_members.insert(name, location);
-
-                                    let Some((_, member_index, typ)) =
-                                        members_to_initialise.remove(&name)
-                                    else {
-                                        return Err(TypingError {
-                                            location,
-                                            kind: TypingErrorKind::UnknownName { name },
-                                        });
-                                    };
-
-                                    self.expect_types(pattern.location, typ, pattern.typ)?;
-
-                                    Ok(tt::DeconstructorArgument {
-                                        member_index,
-                                        pattern,
-                                    })
-                                },
-                            )
-                            .collect::<Result<Box<[_]>, _>>()?;
-
-                        if let Some((name, (location, _, _))) =
-                            members_to_initialise.into_iter().next()
-                        {
-                            return Err(TypingError {
-                                location,
-                                kind: TypingErrorKind::MemberNotDeconstructed { name },
-                            });
-                        }
-
-                        arguments
-                    }
-
-                    tt::TypeKind::Enum { ref members } => match **arguments {
-                        [] => {
-                            return Err(TypingError {
-                                location: pattern.location,
-                                kind: TypingErrorKind::OneEnumVariantMustBeDeconstructed,
-                            });
-                        }
-
-                        [
-                            ast::DeconstructorArgument {
-                                location,
-                                name,
-                                ref pattern,
-                            },
-                        ] => Box::new([{
-                            let Some(member_index) =
-                                members.iter().position(|member| member.name == name)
-                            else {
+                            if let Some(&original_location) = initialised_members.get(&name) {
                                 return Err(TypingError {
                                     location,
-                                    kind: TypingErrorKind::UnknownName { name },
+                                    kind: TypingErrorKind::MemberAlreadyDeconstructed {
+                                        original_location,
+                                        name,
+                                    },
                                 });
-                            };
-                            let typ = members[member_index].typ;
-
-                            let pattern = self.pattern(pattern, names, variables)?;
-                            self.expect_types(pattern.location, typ, pattern.typ)?;
-
-                            tt::DeconstructorArgument {
-                                member_index,
-                                pattern,
                             }
-                        }]),
+                            initialised_members.insert(name, location);
 
-                        _ => {
-                            return Err(TypingError {
-                                location: pattern.location,
-                                kind: TypingErrorKind::OnlyOneEnumVariantCanBeDeconstructed,
-                            });
-                        }
-                    },
+                            Ok(it::DeconstructorArgument { name, pattern })
+                        },
+                    )
+                    .collect::<Result<Box<[_]>, _>>()?;
 
-                    _ => {
-                        return Err(TypingError {
-                            location: typ_location,
-                            kind: TypingErrorKind::ExpectedStructOrEnumTypeButGot { got: typ },
-                        });
-                    }
-                };
+                let required_struct_type = self.types.insert(it::Type {
+                    location: pattern.location,
+                    kind: it::TypeKind::Infer(it::Infer::StructLike {
+                        members: arguments
+                            .iter()
+                            .map(|member| (member.name, member.pattern.typ))
+                            .collect(),
+                    }),
+                });
+                self.expect_types_equal(pattern.location, typ, required_struct_type)?;
 
-                tt::Pattern {
+                it::Pattern {
                     location: pattern.location,
                     typ,
-                    kind: tt::PatternKind::Deconstructor { arguments },
+                    kind: it::PatternKind::Deconstructor { arguments },
                 }
             }
 
             ast::PatternKind::Let { name, ref typ } => {
                 let typ = self.typ(typ, names)?;
-                let variable = variables.insert(tt::Variable {
+                let variable = variables.insert(it::Variable {
                     location: pattern.location,
                     name: Some(name),
                     typ,
@@ -1250,10 +1080,10 @@ impl<'ast> Typer<'ast> {
                         }),
                     }),
                 );
-                tt::Pattern {
+                it::Pattern {
                     location: pattern.location,
                     typ,
-                    kind: tt::PatternKind::Let { variable },
+                    kind: it::PatternKind::Let { variable },
                 }
             }
         })
@@ -1301,19 +1131,247 @@ impl<'ast> Typer<'ast> {
         }
     }
 
-    fn expect_types(
+    fn expect_types_equal(
         &mut self,
         location: SourceLocation,
-        expected: Id<tt::Type>,
-        got: Id<tt::Type>,
+        expected: Id<it::Type>,
+        got: Id<it::Type>,
     ) -> Result<(), TypingError> {
         if expected == got {
             Ok(())
         } else {
-            Err(TypingError {
-                location,
-                kind: TypingErrorKind::ExpectedTypeButGotType { expected, got },
-            })
+            match (&self.types[expected].kind, &self.types[got].kind) {
+                (&it::TypeKind::Resolved(expected), _) => {
+                    self.expect_types_equal(location, expected, got)
+                }
+                (_, &it::TypeKind::Resolved(got)) => {
+                    self.expect_types_equal(self.types[got].location, expected, got)
+                }
+
+                (&it::TypeKind::Infer(it::Infer::Anything), _) => {
+                    self.types[expected].kind = it::TypeKind::Resolved(got);
+                    Ok(())
+                }
+                (_, &it::TypeKind::Infer(it::Infer::Anything)) => {
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+
+                (
+                    &it::TypeKind::Infer(it::Infer::NumberLike),
+                    &it::TypeKind::Infer(it::Infer::NumberLike),
+                ) => {
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+                (&it::TypeKind::I32, &it::TypeKind::Infer(it::Infer::NumberLike)) => {
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+                (&it::TypeKind::Infer(it::Infer::NumberLike), &it::TypeKind::I32) => {
+                    self.types[expected].kind = it::TypeKind::Resolved(got);
+                    Ok(())
+                }
+
+                (
+                    &it::TypeKind::Infer(it::Infer::FunctionLike {
+                        parameters: ref expected_parameters,
+                        return_type: expected_return_type,
+                    }),
+                    &it::TypeKind::Infer(it::Infer::FunctionLike {
+                        parameters: ref got_parameters,
+                        return_type: got_return_type,
+                    }),
+                ) if expected_parameters.len() == got_parameters.len() => {
+                    let expected_parameters = expected_parameters.clone();
+                    let got_parameters = got_parameters.clone();
+
+                    for (expected, got) in expected_parameters.into_iter().zip(got_parameters) {
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.expect_types_equal(
+                        self.types[got_return_type].location,
+                        expected_return_type,
+                        got_return_type,
+                    )?;
+
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+                (
+                    &it::TypeKind::FunctionItem(function),
+                    &it::TypeKind::Infer(it::Infer::FunctionLike {
+                        ref parameters,
+                        return_type,
+                    }),
+                ) if self.functions[function].parameter_types.len() == parameters.len() => {
+                    let function_parameters = self.functions[function].parameter_types.clone();
+                    let parameters = parameters.clone();
+
+                    for (expected, got) in function_parameters.into_iter().zip(parameters) {
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.expect_types_equal(
+                        self.types[return_type].location,
+                        self.functions[function].return_type,
+                        return_type,
+                    )?;
+
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+                (
+                    &it::TypeKind::Infer(it::Infer::FunctionLike {
+                        ref parameters,
+                        return_type,
+                    }),
+                    &it::TypeKind::FunctionItem(function),
+                ) if self.functions[function].parameter_types.len() == parameters.len() => {
+                    let function_parameters = self.functions[function].parameter_types.clone();
+                    let parameters = parameters.clone();
+
+                    for (expected, got) in function_parameters.into_iter().zip(parameters) {
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.expect_types_equal(
+                        self.functions[function].location,
+                        return_type,
+                        self.functions[function].return_type,
+                    )?;
+
+                    self.types[expected].kind = it::TypeKind::Resolved(got);
+                    Ok(())
+                }
+
+                (
+                    &it::TypeKind::Infer(it::Infer::StructLike {
+                        members: ref expected_members,
+                    }),
+                    &it::TypeKind::Infer(it::Infer::StructLike {
+                        members: ref got_members,
+                    }),
+                ) => {
+                    let expected_members = expected_members.clone();
+                    let got_members = got_members.clone();
+
+                    let mut members = FxHashMap::default();
+                    for (&name, &expected) in expected_members.iter() {
+                        members.insert(name, expected);
+                    }
+                    for (&name, &got) in got_members.iter() {
+                        if let Some(expected) = members.insert(name, expected) {
+                            self.expect_types_equal(self.types[got].location, expected, got)?;
+                        }
+                    }
+
+                    self.types[expected].kind =
+                        it::TypeKind::Infer(it::Infer::StructLike { members });
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+
+                (
+                    it::TypeKind::Struct {
+                        members: struct_members,
+                    },
+                    it::TypeKind::Infer(it::Infer::StructLike {
+                        members: got_members,
+                    }),
+                ) if got_members.iter().all(|(&got_name, _)| {
+                    struct_members.iter().any(|member| member.name == got_name)
+                }) =>
+                {
+                    let struct_members = struct_members
+                        .iter()
+                        .map(|member| (member.name, member.typ))
+                        .collect::<FxHashMap<_, _>>();
+                    for (name, got) in got_members.clone() {
+                        let expected = struct_members[&name];
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+                (
+                    it::TypeKind::Infer(it::Infer::StructLike {
+                        members: got_members,
+                    }),
+                    it::TypeKind::Struct {
+                        members: struct_members,
+                    },
+                ) if got_members.iter().all(|(&got_name, _)| {
+                    struct_members.iter().any(|member| member.name == got_name)
+                }) =>
+                {
+                    let struct_members = struct_members
+                        .iter()
+                        .map(|member| (member.name, member.typ))
+                        .collect::<FxHashMap<_, _>>();
+                    for (name, got) in got_members.clone() {
+                        let expected = struct_members[&name];
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.types[expected].kind = it::TypeKind::Resolved(got);
+                    Ok(())
+                }
+
+                (
+                    it::TypeKind::Enum {
+                        members: enum_members,
+                    },
+                    it::TypeKind::Infer(it::Infer::StructLike {
+                        members: got_members,
+                    }),
+                ) if got_members.iter().all(|(&got_name, _)| {
+                    enum_members.iter().any(|member| member.name == got_name)
+                }) =>
+                {
+                    let enum_members = enum_members
+                        .iter()
+                        .map(|member| (member.name, member.typ))
+                        .collect::<FxHashMap<_, _>>();
+                    for (name, got) in got_members.clone() {
+                        let expected = enum_members[&name];
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.types[got].kind = it::TypeKind::Resolved(expected);
+                    Ok(())
+                }
+                (
+                    it::TypeKind::Infer(it::Infer::StructLike {
+                        members: got_members,
+                    }),
+                    it::TypeKind::Enum {
+                        members: enum_members,
+                    },
+                ) if got_members.iter().all(|(&got_name, _)| {
+                    enum_members.iter().any(|member| member.name == got_name)
+                }) =>
+                {
+                    let enum_members = enum_members
+                        .iter()
+                        .map(|member| (member.name, member.typ))
+                        .collect::<FxHashMap<_, _>>();
+                    for (name, got) in got_members.clone() {
+                        let expected = enum_members[&name];
+                        self.expect_types_equal(self.types[got].location, expected, got)?;
+                    }
+
+                    self.types[expected].kind = it::TypeKind::Resolved(got);
+                    Ok(())
+                }
+
+                _ => Err(TypingError {
+                    location,
+                    kind: TypingErrorKind::ExpectedTypeButGotType { expected, got },
+                }),
+            }
         }
     }
 }

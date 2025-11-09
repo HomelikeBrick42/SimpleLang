@@ -18,6 +18,7 @@ enum Bool {
 
 struct Foo {
     member: Unit,
+    member2: I32,
 }
 
 fn main(runtime: Runtime) {
@@ -25,13 +26,15 @@ fn main(runtime: Runtime) {
     print_i32(10, runtime)
 
     // declaring variables
-    let foo: Foo = Foo {
+    let foo = _ {
         member: Unit {},
+        member2: 5,
     }
 
     // reassigning variables
     foo = Foo {
         member: {}, // shorter way to construct the Unit type, just make the compiler do it for you
+        member2: 6,
     }
 
     foo.member
@@ -63,14 +66,14 @@ struct B {
 
 fn match_testing(b: B) -> A {
     match b {
-        B { a: let a: A } => a,
+        B { a: let c } => c,
     }
 }
 
 fn bool_testing(cond: Bool) -> I32 {
     match cond {
-        Bool { true: Unit {} } => 1,
-        Bool { false: Unit {} } => 0,
+        Bool { true: _ {} } => 1,
+        Bool { false: _ {} } => 0,
     }
 }
 
@@ -84,27 +87,16 @@ fn more_bool_testing(cond: Bool) -> I32 {
 
 fn label_testing() 'return: {
     break 'return
-
-    // this is to just make it type check, can be removed in
-    // the future when type inference has been added
-    {}
 }
 
 fn label_testing2() -> I32 'return: {
     break 'return 5
-
-    // this is to just make it type check, can be removed in
-    // the future when type inference has been added
-    0
 }
 
 fn label_testing3() -> Never 'loop: {
     continue 'loop
 }
 
-// doesnt compile *yet* but it will once i have finished with type inference
-/*
 fn while_loop(cond: Bool) {
     while cond {}
 }
-*/

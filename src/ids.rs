@@ -27,10 +27,7 @@ impl<T> Id<T> {
 
 impl<T> Debug for Id<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Id")
-            .field("id_type", &std::any::type_name::<T>())
-            .field("id", &self.0)
-            .finish()
+        write!(f, "Id({})", self.0)
     }
 }
 
@@ -96,6 +93,20 @@ impl<T> IdMap<T> {
     pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut T> {
         self.items.get_mut(&id)
     }
+
+    pub fn get_disjoint_mut<const N: usize>(&mut self, ids: [Id<T>; N]) -> [&mut T; N] {
+        self.items
+            .get_disjoint_mut(ids.each_ref())
+            .map(Option::unwrap)
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
+        self.items.iter().map(|(&id, value)| (id, value))
+    }
+
+    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = (Id<T>, &mut T)> {
+        self.items.iter_mut().map(|(&id, value)| (id, value))
+    }
 }
 
 impl<T> Index<Id<T>> for IdMap<T> {
@@ -128,21 +139,9 @@ impl<T> Default for IdMap<T> {
 
 impl<T: Debug> Debug for IdMap<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct Items<'a, T: Debug> {
-            items: &'a FxHashMap<Id<T>, T>,
-        }
-
-        impl<T: Debug> Debug for Items<'_, T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_map()
-                    .entries(self.items.iter().map(|(id, value)| (id.0, value)))
-                    .finish()
-            }
-        }
-
         f.debug_struct("IdMap")
             .field("id_type", &core::any::type_name::<T>())
-            .field("items", &Items { items: &self.items })
+            .field("items", &self.items)
             .finish()
     }
 }
@@ -182,6 +181,20 @@ impl<T, U> IdSecondaryMap<T, U> {
 
     pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut U> {
         self.items.get_mut(&id)
+    }
+
+    pub fn get_disjoint_mut<const N: usize>(&mut self, ids: [Id<T>; N]) -> [&mut U; N] {
+        self.items
+            .get_disjoint_mut(ids.each_ref())
+            .map(Option::unwrap)
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &U)> {
+        self.items.iter().map(|(&id, value)| (id, value))
+    }
+
+    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = (Id<T>, &mut U)> {
+        self.items.iter_mut().map(|(&id, value)| (id, value))
     }
 }
 
@@ -223,21 +236,9 @@ impl<T, U> Default for IdSecondaryMap<T, U> {
 
 impl<T, U: Debug> Debug for IdSecondaryMap<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct Items<'a, T, U: Debug> {
-            items: &'a FxHashMap<Id<T>, U>,
-        }
-
-        impl<T, U: Debug> Debug for Items<'_, T, U> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_map()
-                    .entries(self.items.iter().map(|(id, value)| (id.0, value)))
-                    .finish()
-            }
-        }
-
         f.debug_struct("IdSecondaryMap")
             .field("id_type", &core::any::type_name::<T>())
-            .field("items", &Items { items: &self.items })
+            .field("items", &self.items)
             .finish()
     }
 }

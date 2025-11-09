@@ -1,3 +1,5 @@
+use rustc_hash::FxHashMap;
+
 use crate::{
     ids::{Id, IdMap},
     interning::InternedStr,
@@ -42,11 +44,26 @@ pub struct Type {
 
 #[derive(Debug)]
 pub enum TypeKind {
+    Resolved(Id<Type>),
+    Infer(Infer),
     Struct { members: Box<[Member]> },
     Enum { members: Box<[Member]> },
     FunctionItem(Id<Function>),
     I32,
     Runtime,
+}
+
+#[derive(Debug)]
+pub enum Infer {
+    Anything,
+    FunctionLike {
+        parameters: Box<[Id<Type>]>,
+        return_type: Id<Type>,
+    },
+    StructLike {
+        members: FxHashMap<InternedStr, Id<Type>>,
+    },
+    NumberLike,
 }
 
 #[derive(Debug)]
@@ -105,9 +122,9 @@ pub enum ExpressionKind {
 pub enum Place {
     Variable(Id<Variable>),
     Function(Id<Function>),
-    StructMemberAccess {
+    MemberAccess {
         operand: Box<Expression>,
-        member_index: usize,
+        member_name: InternedStr,
     },
 }
 
@@ -120,7 +137,7 @@ pub struct Label;
 
 #[derive(Debug)]
 pub struct ConstructorArgument {
-    pub member_index: usize,
+    pub name: InternedStr,
     pub value: Expression,
 }
 
@@ -153,6 +170,6 @@ pub enum PatternKind {
 
 #[derive(Debug)]
 pub struct DeconstructorArgument {
-    pub member_index: usize,
+    pub name: InternedStr,
     pub pattern: Pattern,
 }
