@@ -1,6 +1,8 @@
 use simple_lang::{
+    ids::{Id, IdMap},
+    inferred_tree as it,
+    inferring::{TypingErrorKind, TypingResult, type_items},
     parsing::parse_file,
-    inferring::{TypingResult, type_items},
     validating::validate_items,
 };
 
@@ -22,20 +24,175 @@ fn main() {
         errors,
     } = type_items(&validated_items);
     drop(validated_items);
+    if !errors.is_empty() {
+        for error in errors {
+            eprint!("{}: ", error.location);
+            match error.kind {
+                TypingErrorKind::NameAlreadyDeclared {
+                    name,
+                    defined_location,
+                } => eprintln!("'{name}' was already declared at '{defined_location}'"),
+                TypingErrorKind::UnknownName { name } => eprintln!("Unknown name '{name}'"),
+                TypingErrorKind::UnknownLabel { label } => eprintln!("Unknown label '{label}"),
+                TypingErrorKind::ExpectedValue { declared_location } => {
+                    eprintln!("Expected a value but got the thing declared at {declared_location}")
+                }
+                TypingErrorKind::ExpectedType { declared_location } => {
+                    eprintln!("Expected a type but got the thing declared at {declared_location}")
+                }
+                TypingErrorKind::ExpectedTypeButGotType { expected, got } => eprintln!(
+                    "Expected type {}, but got type {}",
+                    PrettyPrintType {
+                        typ: expected,
+                        types: &types,
+                        functions: &functions
+                    },
+                    PrettyPrintType {
+                        typ: got,
+                        types: &types,
+                        functions: &functions
+                    }
+                ),
+                TypingErrorKind::MemberAlreadyInitialised {
+                    original_location,
+                    name,
+                } => {
+                    eprintln!("The '{name}' member was already initialised at {original_location}")
+                }
+                TypingErrorKind::MemberAlreadyDeconstructed {
+                    original_location,
+                    name,
+                } => eprintln!(
+                    "The '{name}' member was already deconstructed at {original_location}"
+                ),
+                TypingErrorKind::CyclicDependency { resolving_location } => {
+                    eprintln!("Found a cyclic dependency that was started at {resolving_location}")
+                }
+                TypingErrorKind::UnableToInferType { typ } => eprintln!(
+                    "Unable to infer type, only got as far as {}",
+                    PrettyPrintType {
+                        typ,
+                        types: &types,
+                        functions: &functions
+                    }
+                ),
+            }
+        }
+        std::process::exit(1)
+    }
 
     println!("{types:#?}");
     println!("{functions:#?}");
     println!("{function_bodies:#?}");
     println!("{global_names:#?}");
-    if !errors.is_empty() {
-        for error in errors {
-            eprintln!("{error}");
-        }
-        std::process::exit(1)
-    }
 }
 
 fn print_error_and_exit<T: std::fmt::Display, U>(error: T) -> U {
     eprintln!("{error}");
     std::process::exit(1)
+}
+
+struct PrettyPrintType<'a> {
+    typ: Id<it::Type>,
+    types: &'a IdMap<it::Type>,
+    functions: &'a IdMap<it::Function>,
+}
+
+impl std::fmt::Display for PrettyPrintType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn print_type(
+            typ: Id<it::Type>,
+            types: &IdMap<it::Type>,
+            functions: &IdMap<it::Function>,
+            mut f: impl std::fmt::Write,
+        ) -> std::fmt::Result {
+            match types[typ].kind {
+                it::TypeKind::Resolved(typ) => print_type(typ, types, functions, f),
+                it::TypeKind::Infer(ref infer) => match *infer {
+                    it::Infer::Anything => write!(f, "_"),
+                    it::Infer::FunctionLike {
+                        ref parameters,
+                        return_type,
+                    } => {
+                        write!(f, "fn(")?;
+                        for (i, &parameter) in parameters.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(
+                                f,
+                                "{}",
+                                PrettyPrintType {
+                                    typ: parameter,
+                                    types,
+                                    functions
+                                },
+                            )?;
+                        }
+                        write!(
+                            f,
+                            ") -> {}",
+                            PrettyPrintType {
+                                typ: return_type,
+                                types,
+                                functions
+                            },
+                        )
+                    }
+                    it::Infer::StructLike { ref members } => {
+                        write!(f, "_ {{ ")?;
+                        for (i, (&name, &member)) in members.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(
+                                f,
+                                "{name}: {}",
+                                PrettyPrintType {
+                                    typ: member,
+                                    types,
+                                    functions
+                                },
+                            )?;
+                        }
+                        write!(f, " }}")
+                    }
+                    it::Infer::NumberLike => write!(f, "{{{{number}}}}"),
+                },
+                it::TypeKind::Struct { name, .. } => write!(f, "{name}"),
+                it::TypeKind::Enum { name, .. } => write!(f, "{name}"),
+                it::TypeKind::FunctionItem(function) => {
+                    write!(f, "fn(")?;
+                    for (i, &parameter) in functions[function].parameter_types.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(
+                            f,
+                            "{}",
+                            PrettyPrintType {
+                                typ: parameter,
+                                types,
+                                functions
+                            },
+                        )?;
+                    }
+                    write!(
+                        f,
+                        ") -> {} {{{}}}",
+                        PrettyPrintType {
+                            typ: functions[function].return_type,
+                            types,
+                            functions
+                        },
+                        functions[function].name
+                    )
+                }
+                it::TypeKind::I32 => write!(f, "I32"),
+                it::TypeKind::Runtime => write!(f, "Runtime"),
+            }
+        }
+
+        print_type(self.typ, self.types, self.functions, f)
+    }
 }

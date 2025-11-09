@@ -5,52 +5,51 @@ use crate::{
     interning::InternedStr,
     lexing::SourceLocation,
 };
-use derive_more::Display;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::collections::VecDeque;
-use thiserror::Error;
 
-#[derive(Debug, Clone, Error)]
-#[error("{location}: {kind}")]
+#[derive(Debug, Clone)]
 pub struct TypingError {
     pub location: SourceLocation,
     pub kind: TypingErrorKind,
 }
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, Clone)]
 pub enum TypingErrorKind {
-    #[display("The name '{name}' has already been defined at {defined_location}")]
     NameAlreadyDeclared {
         name: InternedStr,
         defined_location: SourceLocation,
     },
-    #[display("Unknown name '{name}'")]
-    UnknownName { name: InternedStr },
-    #[display("Unknown label '{label}")]
-    UnknownLabel { label: InternedStr },
-    #[display("Expected a value but got thing declared at {declared_location}")]
-    ExpectedValue { declared_location: SourceLocation },
-    #[display("Expected a type but got thing declared at {declared_location}")]
-    ExpectedType { declared_location: SourceLocation },
-    #[display("Expected a {expected:?} but got {got:?}")]
+    UnknownName {
+        name: InternedStr,
+    },
+    UnknownLabel {
+        label: InternedStr,
+    },
+    ExpectedValue {
+        declared_location: SourceLocation,
+    },
+    ExpectedType {
+        declared_location: SourceLocation,
+    },
     ExpectedTypeButGotType {
         expected: Id<it::Type>,
         got: Id<it::Type>,
     },
-    #[display("The '{name}' member has already been initialised at {original_location}")]
     MemberAlreadyInitialised {
         original_location: SourceLocation,
         name: InternedStr,
     },
-    #[display("The '{name}' member has already been deconstructed at {original_location}")]
     MemberAlreadyDeconstructed {
         original_location: SourceLocation,
         name: InternedStr,
     },
-    #[display("Found a cyclic dependency that was started at {resolving_location}")]
-    CyclicDependency { resolving_location: SourceLocation },
-    #[display("Unable to infer type, only got as far as {typ:?}")]
-    UnableToInferType { typ: Id<it::Type> },
+    CyclicDependency {
+        resolving_location: SourceLocation,
+    },
+    UnableToInferType {
+        typ: Id<it::Type>,
+    },
 }
 
 #[derive(Debug)]
@@ -321,7 +320,7 @@ impl<'ast> Typer<'ast> {
         Ok(match item.kind {
             ast::ItemKind::Struct {
                 ref builtin,
-                name: _,
+                name,
                 ref members,
             } => {
                 let members = {
@@ -357,7 +356,7 @@ impl<'ast> Typer<'ast> {
 
                 let id = self.types.insert(it::Type {
                     location: item.location,
-                    kind: it::TypeKind::Struct { members },
+                    kind: it::TypeKind::Struct { name, members },
                 });
 
                 if let Some(builtin) = builtin {
@@ -380,7 +379,7 @@ impl<'ast> Typer<'ast> {
 
             ast::ItemKind::Enum {
                 ref builtin,
-                name: _,
+                name,
                 ref members,
             } => {
                 let members = {
@@ -416,7 +415,7 @@ impl<'ast> Typer<'ast> {
 
                 let id = self.types.insert(it::Type {
                     location: item.location,
-                    kind: it::TypeKind::Enum { members },
+                    kind: it::TypeKind::Enum { name, members },
                 });
 
                 if let Some(builtin) = builtin {
@@ -454,7 +453,7 @@ impl<'ast> Typer<'ast> {
             }
 
             ast::ItemKind::Function {
-                name: _,
+                name,
                 ref parameters,
                 ref return_type,
                 ref body,
@@ -522,6 +521,7 @@ impl<'ast> Typer<'ast> {
 
                 let id = self.functions.insert_with(|id| it::Function {
                     location: item.location,
+                    name,
                     parameter_types,
                     return_type,
                     typ: self.types.insert(it::Type {
@@ -1271,6 +1271,7 @@ impl<'ast> Typer<'ast> {
 
                 (
                     it::TypeKind::Struct {
+                        name: _,
                         members: struct_members,
                     },
                     it::TypeKind::Infer(it::Infer::StructLike {
@@ -1297,6 +1298,7 @@ impl<'ast> Typer<'ast> {
                         members: got_members,
                     }),
                     it::TypeKind::Struct {
+                        name: _,
                         members: struct_members,
                     },
                 ) if got_members.iter().all(|(&got_name, _)| {
@@ -1318,6 +1320,7 @@ impl<'ast> Typer<'ast> {
 
                 (
                     it::TypeKind::Enum {
+                        name: _,
                         members: enum_members,
                     },
                     it::TypeKind::Infer(it::Infer::StructLike {
@@ -1344,6 +1347,7 @@ impl<'ast> Typer<'ast> {
                         members: got_members,
                     }),
                     it::TypeKind::Enum {
+                        name: _,
                         members: enum_members,
                     },
                 ) if got_members.iter().all(|(&got_name, _)| {

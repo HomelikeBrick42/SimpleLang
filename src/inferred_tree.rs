@@ -9,6 +9,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Function {
     pub location: SourceLocation,
+    pub name: InternedStr,
     pub parameter_types: Box<[Id<Type>]>,
     pub return_type: Id<Type>,
     pub typ: Id<Type>,
@@ -46,8 +47,14 @@ pub struct Type {
 pub enum TypeKind {
     Resolved(Id<Type>),
     Infer(Infer),
-    Struct { members: Box<[Member]> },
-    Enum { members: Box<[Member]> },
+    Struct {
+        name: InternedStr,
+        members: Box<[Member]>,
+    },
+    Enum {
+        name: InternedStr,
+        members: Box<[Member]>,
+    },
     FunctionItem(Id<Function>),
     I32,
     Runtime,
