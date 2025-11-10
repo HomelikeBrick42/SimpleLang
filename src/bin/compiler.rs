@@ -1,8 +1,10 @@
 use simple_lang::{
     ids::{Id, IdMap},
     inferred_tree as it,
-    inferring::{InferError, InferErrorKind, InferResult, infer_items},
+    inferring::{InferError, InferErrorKind, infer_items},
     parsing::parse_file,
+    type_check::{TypeCheckError, TypeCheckErrorKind, type_check},
+    typed_tree as tt,
     validating::validate_items,
 };
 
@@ -16,23 +18,29 @@ fn main() {
     let validated_items = validate_items(&syntax_items).unwrap_or_else(print_error_and_exit);
     drop(syntax_items);
 
-    let InferResult {
-        types,
-        functions,
-        function_bodies,
-        global_names,
-        errors,
-    } = infer_items(&validated_items);
+    let infer_result = infer_items(&validated_items);
     drop(validated_items);
-    if !errors.is_empty() {
-        print_infer_errors(&errors, &types, &functions);
-        std::process::exit(1)
+    if !infer_result.errors.is_empty() {
+        print_infer_errors(
+            &infer_result.errors,
+            &infer_result.types,
+            &infer_result.functions,
+        );
     }
 
-    println!("{types:#?}");
-    println!("{functions:#?}");
-    println!("{function_bodies:#?}");
-    println!("{global_names:#?}");
+    let type_check_result = type_check(&infer_result);
+    drop(infer_result);
+    if !type_check_result.errors.is_empty() {
+        print_type_check_errors(
+            &type_check_result.errors,
+            &type_check_result.types,
+            &type_check_result.functions,
+        );
+    }
+
+    println!("{:#?}", type_check_result.types);
+    println!("{:#?}", type_check_result.functions);
+    println!("{:#?}", type_check_result.function_bodies);
 }
 
 fn print_error_and_exit<T: std::fmt::Display, U>(error: T) -> U {
@@ -44,7 +52,7 @@ fn print_infer_errors(
     errors: &[InferError],
     types: &IdMap<it::Type>,
     functions: &IdMap<it::Function>,
-) {
+) -> ! {
     for error in errors {
         eprint!("{}: ", error.location);
         match error.kind {
@@ -63,12 +71,12 @@ fn print_infer_errors(
             InferErrorKind::ExpectedTypeButGotType { expected, got } => {
                 eprintln!(
                     "Expected type {}, but got type {}",
-                    PrettyPrintType {
+                    PrettyPrintInferType {
                         typ: expected,
                         types,
                         functions,
                     },
-                    PrettyPrintType {
+                    PrettyPrintInferType {
                         typ: got,
                         types,
                         functions,
@@ -92,7 +100,7 @@ fn print_infer_errors(
             }
             InferErrorKind::UnableToInferType { typ } => eprintln!(
                 "Unable to infer type, only got as far as {}",
-                PrettyPrintType {
+                PrettyPrintInferType {
                     typ,
                     types,
                     functions,
@@ -100,15 +108,16 @@ fn print_infer_errors(
             ),
         }
     }
+    std::process::exit(1)
 }
 
-struct PrettyPrintType<'a> {
+struct PrettyPrintInferType<'a> {
     typ: Id<it::Type>,
     types: &'a IdMap<it::Type>,
     functions: &'a IdMap<it::Function>,
 }
 
-impl std::fmt::Display for PrettyPrintType<'_> {
+impl std::fmt::Display for PrettyPrintInferType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn print_type(
             typ: Id<it::Type>,
@@ -132,7 +141,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                             write!(
                                 f,
                                 "{}",
-                                PrettyPrintType {
+                                PrettyPrintInferType {
                                     typ: parameter,
                                     types,
                                     functions
@@ -142,7 +151,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                         write!(
                             f,
                             ") -> {}",
-                            PrettyPrintType {
+                            PrettyPrintInferType {
                                 typ: return_type,
                                 types,
                                 functions
@@ -158,7 +167,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                             write!(
                                 f,
                                 "{name}: {}",
-                                PrettyPrintType {
+                                PrettyPrintInferType {
                                     typ: member,
                                     types,
                                     functions
@@ -169,9 +178,143 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                     }
                     it::Infer::NumberLike => write!(f, "{{{{number}}}}"),
                 },
+                it::TypeKind::Opaque { name } => write!(f, "{name} {{{{opaque type}}}}"),
                 it::TypeKind::Struct { name, .. } => write!(f, "{name}"),
                 it::TypeKind::Enum { name, .. } => write!(f, "{name}"),
                 it::TypeKind::FunctionItem(function) => {
+                    write!(f, "fn(")?;
+                    for (i, &parameter) in functions[function].parameter_types.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(
+                            f,
+                            "{}",
+                            PrettyPrintInferType {
+                                typ: parameter,
+                                types,
+                                functions
+                            },
+                        )?;
+                    }
+                    write!(
+                        f,
+                        ") -> {} {{{}}}",
+                        PrettyPrintInferType {
+                            typ: functions[function].return_type,
+                            types,
+                            functions
+                        },
+                        functions[function].name
+                    )
+                }
+                it::TypeKind::I32 => write!(f, "I32"),
+                it::TypeKind::Runtime => write!(f, "Runtime"),
+            }
+        }
+
+        print_type(self.typ, self.types, self.functions, f)
+    }
+}
+
+fn print_type_check_errors(
+    errors: &[TypeCheckError],
+    types: &IdMap<tt::Type>,
+    functions: &IdMap<tt::Function>,
+) -> ! {
+    for error in errors {
+        eprintln!("{}: ", error.location);
+        match error.kind {
+            TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ } => {
+                eprintln!(
+                    "Expected struct or enum type but got type {}",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Got type declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::UnknownMemberOnType { member_name, typ } => {
+                eprintln!(
+                    "Unknown member '{member_name}' on type {}",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::MemberWasLeftUninitialised { member_name, typ } => {
+                eprintln!(
+                    "Member '{member_name}' on type {} was left uninitialised",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::OnlyOneEnumVariantCanBeInitialised { typ } => {
+                eprintln!("Only one enum variant can be initialised");
+                eprintln!("{}: Enum type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::MemberWasNotDeconstructed { member_name, typ } => {
+                eprintln!(
+                    "Member '{member_name}' on type {} was not deconstructed",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::OnlyOneEnumVariantCanBeDeconstructed { typ } => {
+                eprintln!("Only one enum variant can be deconstructed");
+                eprintln!("{}: Enum type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::IntegerOutOfRangeForType { value, typ } => {
+                eprintln!(
+                    "Integer value {value} is out of range for type {}",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Integer type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::PlaceMustBeReadable => eprintln!("Place must be readable"),
+            TypeCheckErrorKind::PatternMustBeWritable => eprintln!("Pattern must be writable"),
+            TypeCheckErrorKind::PatternMustBeConstant => eprintln!("Pattern must be constant"),
+        }
+    }
+    std::process::exit(1)
+}
+
+struct PrettyPrintType<'a> {
+    typ: Id<tt::Type>,
+    types: &'a IdMap<tt::Type>,
+    functions: &'a IdMap<tt::Function>,
+}
+
+impl std::fmt::Display for PrettyPrintType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn print_type(
+            typ: Id<tt::Type>,
+            types: &IdMap<tt::Type>,
+            functions: &IdMap<tt::Function>,
+            mut f: impl std::fmt::Write,
+        ) -> std::fmt::Result {
+            match types[typ].kind {
+                tt::TypeKind::Opaque { name } => write!(f, "{name} {{{{opaque type}}}}"),
+                tt::TypeKind::Struct { name, .. } => write!(f, "{name}"),
+                tt::TypeKind::Enum { name, .. } => write!(f, "{name}"),
+                tt::TypeKind::FunctionItem(function) => {
                     write!(f, "fn(")?;
                     for (i, &parameter) in functions[function].parameter_types.iter().enumerate() {
                         if i > 0 {
@@ -198,8 +341,8 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                         functions[function].name
                     )
                 }
-                it::TypeKind::I32 => write!(f, "I32"),
-                it::TypeKind::Runtime => write!(f, "Runtime"),
+                tt::TypeKind::I32 => write!(f, "I32"),
+                tt::TypeKind::Runtime => write!(f, "Runtime"),
             }
         }
 

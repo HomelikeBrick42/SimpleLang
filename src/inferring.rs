@@ -57,7 +57,6 @@ pub struct InferResult {
     pub types: IdMap<it::Type>,
     pub functions: IdMap<it::Function>,
     pub function_bodies: IdSecondaryMap<it::Function, it::FunctionBody>,
-    pub global_names: FxHashMap<InternedStr, GlobalBinding>,
     pub errors: Vec<InferError>,
 }
 
@@ -140,40 +139,6 @@ pub fn infer_items(items: &[ast::Item]) -> InferResult {
         types: inferrer.types,
         functions: inferrer.functions,
         function_bodies,
-        global_names: if errors.is_empty() {
-            global_names
-            .variables_and_types
-            .into_iter()
-            .map(|(name, binding)| {
-                (
-                    name,
-                    GlobalBinding {
-                        location: inferrer.bindings[binding].location,
-                        kind: match inferrer.bindings[binding].kind {
-                            BindingKind::UnresolvedItem { item, names: _ } => {
-                                unreachable!("all bindings should have been resolved, but {item:?} wasnt")
-                            }
-
-                            BindingKind::ResolvingItem { resolving_location } => {
-                                unreachable!("global binding was started resolving at {resolving_location} but never finished")
-                            }
-
-                            BindingKind::Resolved(ref resolved_binding) => match resolved_binding.kind {
-                                ResolvedBindingKind::Type(id) => GlobalBindingKind::Type(id),
-                                ResolvedBindingKind::Function(id) => GlobalBindingKind::Function(id),
-
-                                ResolvedBindingKind::Variable(id) => {
-                                    unreachable!("variable bindings should not be in the global scope, but {id:?} was")
-                                },
-                            },
-                        },
-                    },
-                )
-            })
-            .collect()
-        } else {
-            FxHashMap::default()
-        },
         errors,
     }
 }
@@ -192,6 +157,7 @@ pub enum GlobalBindingKind {
 
 #[derive(Debug, Clone)]
 struct Binding<'ast> {
+    #[expect(unused)]
     pub location: SourceLocation,
     pub kind: BindingKind<'ast>,
 }
@@ -568,11 +534,12 @@ impl<'ast> Inferrer<'ast> {
                 Ok(match statement.kind {
                     ast::StatementKind::Item(_) => None,
 
-                    ast::StatementKind::Expression(ref expression) => {
-                        Some(it::Statement::Expression(Box::new(
+                    ast::StatementKind::Expression(ref expression) => Some(it::Statement {
+                        location: statement.location,
+                        kind: it::StatementKind::Expression(Box::new(
                             self.expression(expression, names, variables)?,
-                        )))
-                    }
+                        )),
+                    }),
 
                     ast::StatementKind::Assignment {
                         ref pattern,
@@ -581,7 +548,10 @@ impl<'ast> Inferrer<'ast> {
                         let pattern = Box::new(self.pattern(pattern, names, variables)?);
                         let value = Box::new(self.expression(value, names, variables)?);
                         self.expect_types_equal(statement.location, pattern.typ, value.typ)?;
-                        Some(it::Statement::Assignment { pattern, value })
+                        Some(it::Statement {
+                            location: statement.location,
+                            kind: it::StatementKind::Assignment { pattern, value },
+                        })
                     }
                 })
             })
@@ -714,7 +684,11 @@ impl<'ast> Inferrer<'ast> {
                             }
                             initialised_members.insert(name, location);
 
-                            Ok(it::ConstructorArgument { name, value })
+                            Ok(it::ConstructorArgument {
+                                location,
+                                name,
+                                value,
+                            })
                         },
                     )
                     .collect::<Result<Box<[_]>, _>>()?;
@@ -1040,7 +1014,11 @@ impl<'ast> Inferrer<'ast> {
                             }
                             initialised_members.insert(name, location);
 
-                            Ok(it::DeconstructorArgument { name, pattern })
+                            Ok(it::DeconstructorArgument {
+                                location,
+                                name,
+                                pattern,
+                            })
                         },
                     )
                     .collect::<Result<Box<[_]>, _>>()?;

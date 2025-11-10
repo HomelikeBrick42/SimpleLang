@@ -130,7 +130,7 @@ pub enum Place {
 
 #[derive(Debug)]
 pub enum Constant {
-    Integer(u64),
+    Integer(u128),
 }
 
 #[derive(Debug)]

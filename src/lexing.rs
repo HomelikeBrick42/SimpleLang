@@ -93,7 +93,7 @@ pub enum TokenKind {
     #[display("'{_0}")]
     Lifetime(InternedStr),
     #[display("{_0}")]
-    Integer(u64),
+    Integer(u128),
     #[display("{_0:?}")]
     String(InternedStr),
 
@@ -295,7 +295,7 @@ impl<'source> Lexer<'source> {
                     }
 
                     first @ '0'..='9' => {
-                        let (mut value, base): (u64, u64) = match (first, self.peek_char()) {
+                        let (mut value, base): (u128, u128) = match (first, self.peek_char()) {
                             ('0', Some('b')) => {
                                 self.next_char();
                                 (0, 2)
