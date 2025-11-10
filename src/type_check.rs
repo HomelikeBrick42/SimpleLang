@@ -80,13 +80,30 @@ pub fn type_check(infer_result: &InferResult) -> TypeCheckResult {
 
     let mut function_bodies = IdSecondaryMap::new();
     for (function, function_body) in infer_result.function_bodies.iter() {
+        let function = checker.function_translations[function];
         function_bodies.insert(
-            checker.function_translations[function],
+            function,
             match function_body {
                 it::FunctionBody::Builtin(builtin_function) => {
                     tt::FunctionBody::Builtin(match builtin_function {
                         it::BuiltinFunction::PrintI32 => {
-                            // TODO: check that function signature is correct
+                            let [first_parameter, second_parameter] =
+                                *checker.functions[function].parameter_types
+                            else {
+                                panic!("#builtin(\"PrintI32\") should have 2 parameters")
+                            };
+
+                            let tt::TypeKind::I32 = checker.types[first_parameter].kind else {
+                                panic!(
+                                    "The first parameter to #builtin(\"PrintI32\") should be I32"
+                                );
+                            };
+                            let tt::TypeKind::Runtime = checker.types[second_parameter].kind else {
+                                panic!(
+                                    "The second parameter to #builtin(\"PrintI32\") should be Runtime"
+                                );
+                            };
+
                             tt::BuiltinFunction::PrintI32
                         }
                     })
