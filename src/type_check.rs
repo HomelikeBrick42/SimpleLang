@@ -1,7 +1,10 @@
+use rustc_hash::FxHashMap;
+
 use crate::{
     ids::{Id, IdMap, IdSecondaryMap},
     inferred_tree as it,
     inferring::InferResult,
+    interning::InternedStr,
     lexing::SourceLocation,
     typed_tree as tt,
 };
@@ -13,7 +16,22 @@ pub struct TypeCheckError {
 }
 
 #[derive(Debug, Clone)]
-pub enum TypeCheckErrorKind {}
+pub enum TypeCheckErrorKind {
+    ExpectedStructOrEnumButGot {
+        typ: Id<tt::Type>,
+    },
+    UnknownMemberOnType {
+        member_name: InternedStr,
+        typ: Id<tt::Type>,
+    },
+    MemberWasLeftUninitialised {
+        member_name: InternedStr,
+        typ: Id<tt::Type>,
+    },
+    OnlyOneEnumVariantCanBeInitialised {
+        typ: Id<tt::Type>,
+    },
+}
 
 pub struct TypeCheckResult {
     pub types: IdMap<tt::Type>,
@@ -32,9 +50,11 @@ pub fn type_check(infer_result: &InferResult) -> TypeCheckResult {
 
         type_translations: IdSecondaryMap::new(),
         function_translations: IdSecondaryMap::new(),
+        label_translations: IdSecondaryMap::new(),
+        variable_translations: IdSecondaryMap::new(),
     };
 
-    let errors = vec![];
+    let mut errors = vec![];
 
     for (typ, _) in infer_result.types.iter() {
         checker.typ(typ);
@@ -44,10 +64,72 @@ pub fn type_check(infer_result: &InferResult) -> TypeCheckResult {
         checker.function(function);
     }
 
+    let mut function_bodies = IdSecondaryMap::new();
+    for (function, function_body) in infer_result.function_bodies.iter() {
+        function_bodies.insert(
+            checker.function_translations[function],
+            match function_body {
+                it::FunctionBody::Builtin(builtin_function) => {
+                    tt::FunctionBody::Builtin(match builtin_function {
+                        it::BuiltinFunction::PrintI32 => {
+                            // TODO: check that function signature is correct
+                            tt::BuiltinFunction::PrintI32
+                        }
+                    })
+                }
+
+                it::FunctionBody::Body {
+                    variables: infer_variables,
+                    parameters: infer_parameters,
+                    expression,
+                } => {
+                    let mut variables = IdMap::new();
+                    for (
+                        infer_variable,
+                        &it::Variable {
+                            location,
+                            name,
+                            typ,
+                        },
+                    ) in infer_variables.iter()
+                    {
+                        let variable = variables.insert(tt::Variable {
+                            location,
+                            name,
+                            typ: checker.typ(typ),
+                        });
+                        checker
+                            .variable_translations
+                            .insert(infer_variable, variable);
+                    }
+
+                    let parameters = infer_parameters
+                        .iter()
+                        .map(|&parameter| checker.variable_translations[parameter])
+                        .collect();
+
+                    let expression = match checker.expression(expression) {
+                        Ok(expression) => Box::new(expression),
+                        Err(error) => {
+                            errors.push(error);
+                            continue;
+                        }
+                    };
+
+                    tt::FunctionBody::Body {
+                        variables,
+                        parameters,
+                        expression,
+                    }
+                }
+            },
+        );
+    }
+
     TypeCheckResult {
         types: checker.types,
         functions: checker.functions,
-        function_bodies: IdSecondaryMap::new(),
+        function_bodies,
         errors,
     }
 }
@@ -61,6 +143,8 @@ struct TypeChecker<'a> {
 
     type_translations: IdSecondaryMap<it::Type, Id<tt::Type>>,
     function_translations: IdSecondaryMap<it::Function, Id<tt::Function>>,
+    label_translations: IdSecondaryMap<it::Label, Id<tt::Label>>,
+    variable_translations: IdSecondaryMap<it::Variable, Id<tt::Variable>>,
 }
 
 impl TypeChecker<'_> {
@@ -172,12 +256,12 @@ impl TypeChecker<'_> {
         id
     }
 
-    fn function(&mut self, function: Id<it::Function>) -> Id<tt::Function> {
-        if let Some(&function) = self.function_translations.get(function) {
+    fn function(&mut self, infer_function_id: Id<it::Function>) -> Id<tt::Function> {
+        if let Some(&function) = self.function_translations.get(infer_function_id) {
             return function;
         }
 
-        let infer_function = &self.infer_functions[function];
+        let infer_function = &self.infer_functions[infer_function_id];
 
         let function = tt::Function {
             location: infer_function.location,
@@ -190,6 +274,210 @@ impl TypeChecker<'_> {
             return_type: self.typ(infer_function.return_type),
         };
 
-        self.functions.insert(function)
+        let function = self.functions.insert(function);
+        self.function_translations
+            .insert(infer_function_id, function);
+        function
+    }
+
+    fn expression(
+        &mut self,
+        expression: &it::Expression,
+    ) -> Result<tt::Expression, TypeCheckError> {
+        let typ = self.typ(expression.typ);
+        Ok(tt::Expression {
+            location: expression.location,
+            typ,
+            kind: match expression.kind {
+                it::ExpressionKind::Place(ref place) => {
+                    tt::ExpressionKind::Place(self.place(place)?)
+                }
+
+                it::ExpressionKind::Constant(ref constant) => {
+                    tt::ExpressionKind::Constant(self.constant(constant)?)
+                }
+
+                it::ExpressionKind::Block {
+                    label: infer_label,
+                    ref statements,
+                    ref last_expression,
+                } => tt::ExpressionKind::Block {
+                    label: {
+                        let label = Id::new();
+                        self.label_translations.insert(infer_label, label);
+                        label
+                    },
+                    statements: statements
+                        .iter()
+                        .map(|statement| self.statement(statement))
+                        .collect::<Result<Box<[_]>, _>>()?,
+                    last_expression: Box::new(self.expression(last_expression)?),
+                },
+
+                it::ExpressionKind::Call {
+                    ref operand,
+                    ref arguments,
+                } => tt::ExpressionKind::Call {
+                    operand: Box::new(self.expression(operand)?),
+                    arguments: arguments
+                        .iter()
+                        .map(|argument| self.expression(argument))
+                        .collect::<Result<Box<[_]>, _>>()?,
+                },
+
+                it::ExpressionKind::Constructor { ref arguments } => match self.types[typ].kind {
+                    tt::TypeKind::Struct {
+                        name: _,
+                        ref members,
+                    } => {
+                        let mut members_to_initialise = members
+                            .iter()
+                            .enumerate()
+                            .map(|(index, member)| (member.name, index))
+                            .collect::<FxHashMap<_, _>>();
+
+                        let arguments = arguments
+                            .iter()
+                            .map(
+                                |&it::ConstructorArgument {
+                                     location,
+                                     name,
+                                     ref value,
+                                 }| {
+                                    Ok(tt::StructConstructorArgument {
+                                        location,
+                                        member_index: members_to_initialise.remove(&name).ok_or(
+                                            TypeCheckError {
+                                                location,
+                                                kind: TypeCheckErrorKind::UnknownMemberOnType {
+                                                    member_name: name,
+                                                    typ,
+                                                },
+                                            },
+                                        )?,
+                                        value: self.expression(value)?,
+                                    })
+                                },
+                            )
+                            .collect::<Result<Box<[_]>, _>>()?;
+
+                        if let Some((name, _)) = members_to_initialise.into_iter().next() {
+                            return Err(TypeCheckError {
+                                location: expression.location,
+                                kind: TypeCheckErrorKind::MemberWasLeftUninitialised {
+                                    member_name: name,
+                                    typ,
+                                },
+                            });
+                        }
+
+                        tt::ExpressionKind::StructConstructor { arguments }
+                    }
+
+                    tt::TypeKind::Enum {
+                        name: _,
+                        ref members,
+                    } => tt::ExpressionKind::EnumConstructor {
+                        arguments: match **arguments {
+                            [
+                                it::ConstructorArgument {
+                                    location,
+                                    name,
+                                    ref value,
+                                },
+                            ] => Box::new(tt::EnumConstructorArgument {
+                                location,
+                                variant_index: members
+                                    .iter()
+                                    .position(|member| member.name == name)
+                                    .ok_or(TypeCheckError {
+                                        location,
+                                        kind: TypeCheckErrorKind::UnknownMemberOnType {
+                                            member_name: name,
+                                            typ,
+                                        },
+                                    })?,
+                                value: self.expression(value)?,
+                            }),
+
+                            _ => {
+                                return Err(TypeCheckError {
+                                    location: expression.location,
+                                    kind: TypeCheckErrorKind::OnlyOneEnumVariantCanBeInitialised {
+                                        typ,
+                                    },
+                                });
+                            }
+                        },
+                    },
+
+                    tt::TypeKind::Opaque { .. }
+                    | tt::TypeKind::FunctionItem(_)
+                    | tt::TypeKind::I32
+                    | tt::TypeKind::Runtime => {
+                        return Err(TypeCheckError {
+                            location: expression.location,
+                            kind: TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ },
+                        });
+                    }
+                },
+
+                it::ExpressionKind::Match {
+                    ref scruitnee,
+                    ref arms,
+                } => {
+                    let scruitnee = Box::new(self.expression(scruitnee)?);
+                    let arms = arms
+                        .iter()
+                        .map(
+                            |&it::MatchArm {
+                                 location,
+                                 ref pattern,
+                                 ref value,
+                             }| {
+                                Ok(tt::MatchArm {
+                                    location,
+                                    pattern: self.pattern(pattern)?,
+                                    value: self.expression(value)?,
+                                })
+                            },
+                        )
+                        .collect::<Result<Box<[_]>, _>>()?;
+
+                    // TODO: check match arm exhaustiveness
+
+                    tt::ExpressionKind::Match { scruitnee, arms }
+                }
+
+                it::ExpressionKind::Break { label, ref value } => tt::ExpressionKind::Break {
+                    label: self.label_translations[label],
+                    value: Box::new(self.expression(value)?),
+                },
+
+                it::ExpressionKind::Continue { label } => tt::ExpressionKind::Continue {
+                    label: self.label_translations[label],
+                },
+            },
+        })
+    }
+
+    fn place(&mut self, place: &it::Place) -> Result<tt::Place, TypeCheckError> {
+        _ = place;
+        todo!()
+    }
+
+    fn constant(&mut self, constant: &it::Constant) -> Result<tt::Constant, TypeCheckError> {
+        _ = constant;
+        todo!()
+    }
+
+    fn statement(&mut self, statement: &it::Statement) -> Result<tt::Statement, TypeCheckError> {
+        _ = statement;
+        todo!()
+    }
+
+    fn pattern(&mut self, pattern: &it::Pattern) -> Result<tt::Pattern, TypeCheckError> {
+        _ = pattern;
+        todo!()
     }
 }

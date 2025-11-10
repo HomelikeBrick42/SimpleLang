@@ -146,6 +146,7 @@ pub struct Label;
 
 #[derive(Debug)]
 pub struct ConstructorArgument {
+    pub location: SourceLocation,
     pub name: InternedStr,
     pub value: Expression,
 }

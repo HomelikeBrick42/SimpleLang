@@ -17,7 +17,7 @@ pub enum FunctionBody {
     Builtin(BuiltinFunction),
     Body {
         variables: IdMap<Variable>,
-        parameter_variables: Box<[Id<Variable>]>,
+        parameters: Box<[Id<Variable>]>,
         expression: Box<Expression>,
     },
 }

@@ -680,7 +680,11 @@ impl<'ast> Inferrer<'ast> {
                             }
                             initialised_members.insert(name, location);
 
-                            Ok(it::ConstructorArgument { name, value })
+                            Ok(it::ConstructorArgument {
+                                location,
+                                name,
+                                value,
+                            })
                         },
                     )
                     .collect::<Result<Box<[_]>, _>>()?;
