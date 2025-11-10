@@ -31,6 +31,17 @@ pub enum TypeCheckErrorKind {
     OnlyOneEnumVariantCanBeInitialised {
         typ: Id<tt::Type>,
     },
+    MemberWasNotDeconstructed {
+        member_name: InternedStr,
+        typ: Id<tt::Type>,
+    },
+    OnlyOneEnumVariantCanBeDeconstructed {
+        typ: Id<tt::Type>,
+    },
+    IntegerOutOfRangeForType {
+        value: u128,
+        typ: Id<tt::Type>,
+    },
 }
 
 pub struct TypeCheckResult {
@@ -290,12 +301,12 @@ impl TypeChecker<'_> {
             typ,
             kind: match expression.kind {
                 it::ExpressionKind::Place(ref place) => {
-                    tt::ExpressionKind::Place(self.place(place)?)
+                    tt::ExpressionKind::Place(self.place(expression.location, typ, place)?)
                 }
 
-                it::ExpressionKind::Constant(ref constant) => {
-                    tt::ExpressionKind::Constant(self.constant(constant)?)
-                }
+                it::ExpressionKind::Constant(ref constant) => tt::ExpressionKind::Constant(
+                    self.constant(expression.location, typ, constant)?,
+                ),
 
                 it::ExpressionKind::Block {
                     label: infer_label,
@@ -437,7 +448,14 @@ impl TypeChecker<'_> {
                              }| {
                                 Ok(tt::MatchArm {
                                     location,
-                                    pattern: self.pattern(pattern)?,
+                                    pattern: {
+                                        let pattern = self.pattern(pattern)?;
+
+                                        // TODO: check that pattern is a constant
+
+                                        #[expect(clippy::let_and_return)]
+                                        pattern
+                                    },
                                     value: self.expression(value)?,
                                 })
                             },
@@ -461,23 +479,243 @@ impl TypeChecker<'_> {
         })
     }
 
-    fn place(&mut self, place: &it::Place) -> Result<tt::Place, TypeCheckError> {
-        _ = place;
-        todo!()
+    fn place(
+        &mut self,
+        location: SourceLocation,
+        #[expect(unused)] typ: Id<tt::Type>,
+        place: &it::Place,
+    ) -> Result<tt::Place, TypeCheckError> {
+        Ok(match *place {
+            it::Place::Variable(id) => tt::Place::Variable(self.variable_translations[id]),
+
+            it::Place::Function(id) => tt::Place::Function(self.function(id)),
+
+            it::Place::MemberAccess {
+                ref operand,
+                member_name,
+            } => {
+                let operand = Box::new(self.expression(operand)?);
+                let typ = operand.typ;
+
+                match self.types[typ].kind {
+                    tt::TypeKind::Struct {
+                        name: _,
+                        ref members,
+                    } => {
+                        let member_index = members
+                            .iter()
+                            .position(|member| member.name == member_name)
+                            .ok_or(TypeCheckError {
+                                location,
+                                kind: TypeCheckErrorKind::UnknownMemberOnType { member_name, typ },
+                            })?;
+                        tt::Place::StructMemberAccess {
+                            operand,
+                            member_index,
+                        }
+                    }
+
+                    tt::TypeKind::Enum {
+                        name: _,
+                        ref members,
+                    } => {
+                        let variant_index = members
+                            .iter()
+                            .position(|member| member.name == member_name)
+                            .ok_or(TypeCheckError {
+                                location,
+                                kind: TypeCheckErrorKind::UnknownMemberOnType { member_name, typ },
+                            })?;
+                        tt::Place::EnumMemberAccess {
+                            operand,
+                            variant_index,
+                        }
+                    }
+
+                    tt::TypeKind::Opaque { .. }
+                    | tt::TypeKind::FunctionItem(_)
+                    | tt::TypeKind::I32
+                    | tt::TypeKind::Runtime => {
+                        return Err(TypeCheckError {
+                            location,
+                            kind: TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ },
+                        });
+                    }
+                }
+            }
+        })
     }
 
-    fn constant(&mut self, constant: &it::Constant) -> Result<tt::Constant, TypeCheckError> {
-        _ = constant;
-        todo!()
+    fn constant(
+        &mut self,
+        location: SourceLocation,
+        typ: Id<tt::Type>,
+        constant: &it::Constant,
+    ) -> Result<tt::Constant, TypeCheckError> {
+        Ok(match *constant {
+            it::Constant::Integer(value) => match self.types[typ].kind {
+                tt::TypeKind::I32 => {
+                    if value.cast_signed() < i32::MIN as _ || value.cast_signed() > i32::MAX as _ {
+                        return Err(TypeCheckError {
+                            location,
+                            kind: TypeCheckErrorKind::IntegerOutOfRangeForType { value, typ },
+                        });
+                    }
+                    tt::Constant::I32(value.try_into().unwrap())
+                }
+
+                tt::TypeKind::Opaque { .. }
+                | tt::TypeKind::Struct { .. }
+                | tt::TypeKind::Enum { .. }
+                | tt::TypeKind::FunctionItem(_)
+                | tt::TypeKind::Runtime => {
+                    unreachable!("Integer type was somehow {:?}", self.types[typ])
+                }
+            },
+        })
     }
 
     fn statement(&mut self, statement: &it::Statement) -> Result<tt::Statement, TypeCheckError> {
-        _ = statement;
-        todo!()
+        Ok(tt::Statement {
+            location: statement.location,
+            kind: match statement.kind {
+                it::StatementKind::Expression(ref expression) => {
+                    tt::StatementKind::Expression(Box::new(self.expression(expression)?))
+                }
+
+                it::StatementKind::Assignment {
+                    ref pattern,
+                    ref value,
+                } => {
+                    let pattern = Box::new(self.pattern(pattern)?);
+                    let value = Box::new(self.expression(value)?);
+
+                    // TODO: check that pattern is assignable
+
+                    tt::StatementKind::Assignment { pattern, value }
+                }
+            },
+        })
     }
 
     fn pattern(&mut self, pattern: &it::Pattern) -> Result<tt::Pattern, TypeCheckError> {
-        _ = pattern;
-        todo!()
+        let typ = self.typ(pattern.typ);
+        Ok(tt::Pattern {
+            location: pattern.location,
+            typ,
+            kind: match pattern.kind {
+                it::PatternKind::Discard => tt::PatternKind::Discard,
+
+                it::PatternKind::Place(ref place) => {
+                    tt::PatternKind::Place(self.place(pattern.location, typ, place)?)
+                }
+
+                it::PatternKind::Constant(ref constant) => {
+                    tt::PatternKind::Constant(self.constant(pattern.location, typ, constant)?)
+                }
+
+                it::PatternKind::Deconstructor { ref arguments } => match self.types[typ].kind {
+                    tt::TypeKind::Struct {
+                        name: _,
+                        ref members,
+                    } => {
+                        let mut members_to_initialise = members
+                            .iter()
+                            .enumerate()
+                            .map(|(index, member)| (member.name, index))
+                            .collect::<FxHashMap<_, _>>();
+
+                        let arguments = arguments
+                            .iter()
+                            .map(
+                                |&it::DeconstructorArgument {
+                                     location,
+                                     name,
+                                     ref pattern,
+                                 }| {
+                                    Ok(tt::StructDeconstructorArgument {
+                                        location,
+                                        member_index: members_to_initialise.remove(&name).ok_or(
+                                            TypeCheckError {
+                                                location,
+                                                kind: TypeCheckErrorKind::UnknownMemberOnType {
+                                                    member_name: name,
+                                                    typ,
+                                                },
+                                            },
+                                        )?,
+                                        pattern: self.pattern(pattern)?,
+                                    })
+                                },
+                            )
+                            .collect::<Result<Box<[_]>, _>>()?;
+
+                        if let Some((name, _)) = members_to_initialise.into_iter().next() {
+                            return Err(TypeCheckError {
+                                location: pattern.location,
+                                kind: TypeCheckErrorKind::MemberWasNotDeconstructed {
+                                    member_name: name,
+                                    typ,
+                                },
+                            });
+                        }
+
+                        tt::PatternKind::StructDeconstructor { arguments }
+                    }
+
+                    tt::TypeKind::Enum {
+                        name: _,
+                        ref members,
+                    } => tt::PatternKind::EnumDeconstructor {
+                        arguments: match **arguments {
+                            [
+                                it::DeconstructorArgument {
+                                    location,
+                                    name,
+                                    ref pattern,
+                                },
+                            ] => Box::new(tt::EnumDeconstructorArgument {
+                                location,
+                                variant_index: members
+                                    .iter()
+                                    .position(|member| member.name == name)
+                                    .ok_or(TypeCheckError {
+                                        location,
+                                        kind: TypeCheckErrorKind::UnknownMemberOnType {
+                                            member_name: name,
+                                            typ,
+                                        },
+                                    })?,
+                                pattern: self.pattern(pattern)?,
+                            }),
+
+                            _ => {
+                                return Err(TypeCheckError {
+                                    location: pattern.location,
+                                    kind:
+                                        TypeCheckErrorKind::OnlyOneEnumVariantCanBeDeconstructed {
+                                            typ,
+                                        },
+                                });
+                            }
+                        },
+                    },
+
+                    tt::TypeKind::Opaque { .. }
+                    | tt::TypeKind::FunctionItem(_)
+                    | tt::TypeKind::I32
+                    | tt::TypeKind::Runtime => {
+                        return Err(TypeCheckError {
+                            location: pattern.location,
+                            kind: TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ },
+                        });
+                    }
+                },
+
+                it::PatternKind::Let { variable } => tt::PatternKind::Let {
+                    variable: self.variable_translations[variable],
+                },
+            },
+        })
     }
 }

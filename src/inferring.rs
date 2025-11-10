@@ -534,11 +534,12 @@ impl<'ast> Inferrer<'ast> {
                 Ok(match statement.kind {
                     ast::StatementKind::Item(_) => None,
 
-                    ast::StatementKind::Expression(ref expression) => {
-                        Some(it::Statement::Expression(Box::new(
+                    ast::StatementKind::Expression(ref expression) => Some(it::Statement {
+                        location: statement.location,
+                        kind: it::StatementKind::Expression(Box::new(
                             self.expression(expression, names, variables)?,
-                        )))
-                    }
+                        )),
+                    }),
 
                     ast::StatementKind::Assignment {
                         ref pattern,
@@ -547,7 +548,10 @@ impl<'ast> Inferrer<'ast> {
                         let pattern = Box::new(self.pattern(pattern, names, variables)?);
                         let value = Box::new(self.expression(value, names, variables)?);
                         self.expect_types_equal(statement.location, pattern.typ, value.typ)?;
-                        Some(it::Statement::Assignment { pattern, value })
+                        Some(it::Statement {
+                            location: statement.location,
+                            kind: it::StatementKind::Assignment { pattern, value },
+                        })
                     }
                 })
             })
@@ -1010,7 +1014,11 @@ impl<'ast> Inferrer<'ast> {
                             }
                             initialised_members.insert(name, location);
 
-                            Ok(it::DeconstructorArgument { name, pattern })
+                            Ok(it::DeconstructorArgument {
+                                location,
+                                name,
+                                pattern,
+                            })
                         },
                     )
                     .collect::<Result<Box<[_]>, _>>()?;

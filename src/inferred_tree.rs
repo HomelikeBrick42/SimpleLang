@@ -83,7 +83,13 @@ pub struct Member {
 }
 
 #[derive(Debug)]
-pub enum Statement {
+pub struct Statement {
+    pub location: SourceLocation,
+    pub kind: StatementKind,
+}
+
+#[derive(Debug)]
+pub enum StatementKind {
     Expression(Box<Expression>),
     Assignment {
         pattern: Box<Pattern>,
@@ -139,7 +145,7 @@ pub enum Place {
 
 #[derive(Debug)]
 pub enum Constant {
-    Integer(u64),
+    Integer(u128),
 }
 
 pub struct Label;
@@ -180,6 +186,7 @@ pub enum PatternKind {
 
 #[derive(Debug)]
 pub struct DeconstructorArgument {
+    pub location: SourceLocation,
     pub name: InternedStr,
     pub pattern: Pattern,
 }

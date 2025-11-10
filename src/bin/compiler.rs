@@ -262,6 +262,32 @@ fn print_type_check_errors(
                 eprintln!("Only one enum variant can be initialised");
                 eprintln!("{}: Enum type was declared here", types[typ].location);
             }
+            TypeCheckErrorKind::MemberWasNotDeconstructed { member_name, typ } => {
+                eprintln!(
+                    "Member '{member_name}' on type {} was not deconstructed",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::OnlyOneEnumVariantCanBeDeconstructed { typ } => {
+                eprintln!("Only one enum variant can be deconstructed");
+                eprintln!("{}: Enum type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::IntegerOutOfRangeForType { value, typ } => {
+                eprintln!(
+                    "Integer value {value} is out of range for type {}",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Integer type was declared here", types[typ].location);
+            }
         }
     }
     std::process::exit(1)

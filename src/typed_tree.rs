@@ -139,6 +139,7 @@ pub struct Pattern {
 
 #[derive(Debug)]
 pub enum PatternKind {
+    Discard,
     Place(Place),
     Constant(Constant),
     StructDeconstructor {
