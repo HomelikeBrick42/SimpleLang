@@ -27,8 +27,6 @@ pub enum SyntaxTreeValidationErrorKind {
     MultipleBuiltinAttributes,
     #[display("Unknown builtin {_0:?}")]
     UnknownBuiltin(InternedStr),
-    #[display("Type annotation must have a type")]
-    TypeAnnotationMustHaveType,
     #[display("#builtin type annotation must not have a type")]
     BuiltinTypeAnnotationMustNotHaveType,
     #[display("Function must have a body")]
@@ -217,14 +215,20 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                             });
                         }
                     }
-                } else {
-                    let Some(typ) = typ else {
-                        return Err(SyntaxTreeValidationError {
-                            location: type_token.location,
-                            kind: SyntaxTreeValidationErrorKind::TypeAnnotationMustHaveType,
-                        });
-                    };
+                } else if let Some(typ) = typ {
                     validate_type(&typ.typ)?
+                } else {
+                    ast::Type {
+                        location: type_token.location,
+                        kind: ast::TypeKind::Opaque {
+                            name: {
+                                let TokenKind::Name(name) = name_token.kind else {
+                                    unreachable!("{name_token:?}")
+                                };
+                                name
+                            },
+                        },
+                    }
                 }),
             },
 

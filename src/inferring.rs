@@ -917,6 +917,11 @@ impl<'ast> Inferrer<'ast> {
                 }
             },
 
+            ast::TypeKind::Opaque { name } => self.types.insert(it::Type {
+                location: typ.location,
+                kind: it::TypeKind::Opaque { name },
+            }),
+
             ast::TypeKind::Builtin(ref builtin_type) => match builtin_type {
                 ast::BuiltinType::Unit => self
                     .unit_type

@@ -163,6 +163,7 @@ pub struct Type {
 pub enum TypeKind {
     Infer,
     Path(Box<Path>),
+    Opaque { name: InternedStr },
     Builtin(BuiltinType),
 }
 
