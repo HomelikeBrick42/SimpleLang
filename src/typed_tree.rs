@@ -8,7 +8,6 @@ use crate::{
 pub struct Function {
     pub location: SourceLocation,
     pub name: InternedStr,
-    pub typ: Id<Type>,
     pub parameter_types: Box<[Id<Type>]>,
     pub return_type: Id<Type>,
 }
@@ -175,6 +174,9 @@ pub struct Type {
 
 #[derive(Debug)]
 pub enum TypeKind {
+    Opaque {
+        name: InternedStr,
+    },
     Struct {
         name: InternedStr,
         members: Box<[Member]>,

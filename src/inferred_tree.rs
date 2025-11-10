@@ -46,6 +46,9 @@ pub struct Type {
 pub enum TypeKind {
     Resolved(Id<Type>),
     Infer(Infer),
+    Opaque {
+        name: InternedStr,
+    },
     Struct {
         name: InternedStr,
         members: Box<[Member]>,

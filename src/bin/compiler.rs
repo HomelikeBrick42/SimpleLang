@@ -177,6 +177,7 @@ impl std::fmt::Display for PrettyPrintInferType<'_> {
                     }
                     it::Infer::NumberLike => write!(f, "{{{{number}}}}"),
                 },
+                it::TypeKind::Opaque { name } => write!(f, "{name} {{{{opaque type}}}}"),
                 it::TypeKind::Struct { name, .. } => write!(f, "{name}"),
                 it::TypeKind::Enum { name, .. } => write!(f, "{name}"),
                 it::TypeKind::FunctionItem(function) => {
