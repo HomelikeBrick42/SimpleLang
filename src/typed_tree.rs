@@ -58,7 +58,7 @@ pub enum ExpressionKind {
         arguments: Box<[StructConstructorArgument]>,
     },
     EnumConstructor {
-        arguments: Box<EnumConstructorArgument>,
+        argument: Box<EnumConstructorArgument>,
     },
     Match {
         scruitnee: Box<Expression>,
@@ -146,7 +146,7 @@ pub enum PatternKind {
         arguments: Box<[StructDeconstructorArgument]>,
     },
     EnumDeconstructor {
-        arguments: Box<EnumDeconstructorArgument>,
+        argument: Box<EnumDeconstructorArgument>,
     },
     Let {
         variable: Id<Variable>,

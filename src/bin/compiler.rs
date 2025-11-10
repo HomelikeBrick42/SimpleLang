@@ -288,6 +288,9 @@ fn print_type_check_errors(
                 );
                 eprintln!("{}: Integer type was declared here", types[typ].location);
             }
+            TypeCheckErrorKind::PlaceMustBeReadable => eprintln!("Place must be readable"),
+            TypeCheckErrorKind::PatternMustBeWritable => eprintln!("Pattern must be writable"),
+            TypeCheckErrorKind::PatternMustBeConstant => eprintln!("Pattern must be constant"),
         }
     }
     std::process::exit(1)

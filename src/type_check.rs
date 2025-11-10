@@ -42,6 +42,9 @@ pub enum TypeCheckErrorKind {
         value: u128,
         typ: Id<tt::Type>,
     },
+    PlaceMustBeReadable,
+    PatternMustBeWritable,
+    PatternMustBeConstant,
 }
 
 pub struct TypeCheckResult {
@@ -301,7 +304,9 @@ impl TypeChecker<'_> {
             typ,
             kind: match expression.kind {
                 it::ExpressionKind::Place(ref place) => {
-                    tt::ExpressionKind::Place(self.place(expression.location, typ, place)?)
+                    let place = self.place(expression.location, typ, place)?;
+                    check_place_readable(expression.location, &place)?;
+                    tt::ExpressionKind::Place(place)
                 }
 
                 it::ExpressionKind::Constant(ref constant) => tt::ExpressionKind::Constant(
@@ -389,7 +394,7 @@ impl TypeChecker<'_> {
                         name: _,
                         ref members,
                     } => tt::ExpressionKind::EnumConstructor {
-                        arguments: match **arguments {
+                        argument: match **arguments {
                             [
                                 it::ConstructorArgument {
                                     location,
@@ -450,10 +455,7 @@ impl TypeChecker<'_> {
                                     location,
                                     pattern: {
                                         let pattern = self.pattern(pattern)?;
-
-                                        // TODO: check that pattern is a constant
-
-                                        #[expect(clippy::let_and_return)]
+                                        check_pattern_constant(&pattern)?;
                                         pattern
                                     },
                                     value: self.expression(value)?,
@@ -590,7 +592,7 @@ impl TypeChecker<'_> {
                     let pattern = Box::new(self.pattern(pattern)?);
                     let value = Box::new(self.expression(value)?);
 
-                    // TODO: check that pattern is assignable
+                    check_pattern_writable(&pattern)?;
 
                     tt::StatementKind::Assignment { pattern, value }
                 }
@@ -667,7 +669,7 @@ impl TypeChecker<'_> {
                         name: _,
                         ref members,
                     } => tt::PatternKind::EnumDeconstructor {
-                        arguments: match **arguments {
+                        argument: match **arguments {
                             [
                                 it::DeconstructorArgument {
                                     location,
@@ -716,6 +718,89 @@ impl TypeChecker<'_> {
                     variable: self.variable_translations[variable],
                 },
             },
+        })
+    }
+}
+
+fn check_place_readable(location: SourceLocation, place: &tt::Place) -> Result<(), TypeCheckError> {
+    let readable = match place {
+        tt::Place::Function(_) => true,
+        tt::Place::Variable(_) => true,
+        tt::Place::StructMemberAccess { .. } => true,
+        tt::Place::EnumMemberAccess { .. } => false,
+    };
+    if readable {
+        Ok(())
+    } else {
+        Err(TypeCheckError {
+            location,
+            kind: TypeCheckErrorKind::PlaceMustBeReadable,
+        })
+    }
+}
+
+fn check_pattern_writable(pattern: &tt::Pattern) -> Result<(), TypeCheckError> {
+    let writable = match pattern.kind {
+        tt::PatternKind::Discard => true,
+        tt::PatternKind::Place(ref place) => match *place {
+            tt::Place::Function(_) => false,
+            tt::Place::Variable(_) => true,
+            tt::Place::StructMemberAccess { .. } => true,
+            tt::Place::EnumMemberAccess { .. } => false,
+        },
+        tt::PatternKind::Constant(_) => false,
+        tt::PatternKind::StructDeconstructor { ref arguments } => {
+            return arguments
+                .iter()
+                .try_for_each(|argument| check_pattern_writable(&argument.pattern));
+        }
+        tt::PatternKind::EnumDeconstructor { ref argument } => {
+            return check_pattern_writable(&argument.pattern);
+        }
+        tt::PatternKind::Let { .. } => true,
+    };
+    if writable {
+        Ok(())
+    } else {
+        Err(TypeCheckError {
+            location: pattern.location,
+            kind: TypeCheckErrorKind::PatternMustBeWritable,
+        })
+    }
+}
+
+fn check_pattern_constant(pattern: &tt::Pattern) -> Result<(), TypeCheckError> {
+    let constant = match pattern.kind {
+        tt::PatternKind::Discard => true,
+        tt::PatternKind::Place(ref place) => match *place {
+            tt::Place::Function(_) => true,
+            tt::Place::Variable(_) => false,
+            tt::Place::StructMemberAccess {
+                operand: _,
+                member_index: _,
+            } => false,
+            tt::Place::EnumMemberAccess {
+                operand: _,
+                variant_index: _,
+            } => false,
+        },
+        tt::PatternKind::Constant(_) => true,
+        tt::PatternKind::StructDeconstructor { ref arguments } => {
+            return arguments
+                .iter()
+                .try_for_each(|argument| check_pattern_constant(&argument.pattern));
+        }
+        tt::PatternKind::EnumDeconstructor { ref argument } => {
+            return check_pattern_constant(&argument.pattern);
+        }
+        tt::PatternKind::Let { .. } => true,
+    };
+    if constant {
+        Ok(())
+    } else {
+        Err(TypeCheckError {
+            location: pattern.location,
+            kind: TypeCheckErrorKind::PatternMustBeConstant,
         })
     }
 }
