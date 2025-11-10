@@ -38,6 +38,8 @@ pub enum TokenKind {
     #[display("}}")]
     CloseBrace,
 
+    #[display("#")]
+    Hash,
     #[display(":")]
     Colon,
     #[display(",")]
@@ -65,6 +67,8 @@ pub enum TokenKind {
     Name(InternedStr),
     #[display("_")]
     Discard,
+    #[display("builtin keyword")]
+    BuiltinKeyword,
     #[display("fn keyword")]
     FnKeyword,
     #[display("struct keyword")]
@@ -96,9 +100,6 @@ pub enum TokenKind {
     Integer(u128),
     #[display("{_0:?}")]
     String(InternedStr),
-
-    #[display("#builtin")]
-    BuiltinDirective,
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +202,7 @@ impl<'source> Lexer<'source> {
                     '{' => TokenKind::OpenBrace,
                     '}' => TokenKind::CloseBrace,
 
+                    '#' => TokenKind::Hash,
                     ':' => TokenKind::Colon,
                     ',' => TokenKind::Comma,
                     '=' => match self.peek_char() {
@@ -278,6 +280,7 @@ impl<'source> Lexer<'source> {
 
                         match &self.source[start_location.position..self.location.position] {
                             "_" => TokenKind::Discard,
+                            "builtin" => TokenKind::BuiltinKeyword,
                             "fn" => TokenKind::FnKeyword,
                             "struct" => TokenKind::StructKeyword,
                             "enum" => TokenKind::EnumKeyword,
@@ -435,22 +438,6 @@ impl<'source> Lexer<'source> {
                             }
                         }
                         TokenKind::String(string.as_str().into())
-                    }
-
-                    '#' => {
-                        while let Some('A'..='Z' | 'a'..='z' | '0'..='9' | '_') = self.peek_char() {
-                            self.next_char();
-                        }
-
-                        match &self.source[start_location.position..self.location.position] {
-                            "#builtin" => TokenKind::BuiltinDirective,
-                            name => {
-                                return Err(LexingError {
-                                    location: start_location,
-                                    kind: LexerErrorKind::UnknownDirective(name.into()),
-                                });
-                            }
-                        }
                     }
 
                     c => {

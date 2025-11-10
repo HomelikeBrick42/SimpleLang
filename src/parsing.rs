@@ -95,19 +95,23 @@ pub fn parse_item(lexer: &mut Lexer) -> Result<Item, ParsingError> {
         while consume!(lexer, TokenKind::Newline).is_some() {}
 
         attributes.push(match lexer.peek_token()? {
-            builtin_token @ Token {
+            hash_token @ Token {
                 location,
-                kind: TokenKind::BuiltinDirective,
+                kind: TokenKind::Hash,
             } => {
                 lexer.next_token()?;
+
                 Attribute {
                     location,
+                    hash_token,
+                    open_bracket_token: expect!(lexer, TokenKind::OpenBracket)?,
                     kind: AttributeKind::Builtin {
-                        builtin_token,
+                        builtin_token: expect!(lexer, TokenKind::BuiltinKeyword)?,
                         open_parenthesis_token: expect!(lexer, TokenKind::OpenParenthesis)?,
                         string_token: expect!(lexer, TokenKind::String(_))?,
                         close_parenthesis_token: expect!(lexer, TokenKind::CloseParenthesis)?,
                     },
+                    close_bracket_token: expect!(lexer, TokenKind::CloseBracket)?,
                 }
             }
 
@@ -293,7 +297,7 @@ pub fn parse_statement(lexer: &mut Lexer) -> Result<Statement, ParsingError> {
                 | TokenKind::TypeKeyword
                 | TokenKind::FnKeyword
                 | TokenKind::ConstKeyword
-                | TokenKind::BuiltinDirective,
+                | TokenKind::Hash,
         } => Statement {
             location,
             kind: StatementKind::Item(Box::new(parse_item(lexer)?)),

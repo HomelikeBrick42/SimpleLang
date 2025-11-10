@@ -3,7 +3,10 @@ use crate::lexing::{SourceLocation, Token};
 #[derive(Debug)]
 pub struct Attribute {
     pub location: SourceLocation,
+    pub hash_token: Token,
+    pub open_bracket_token: Token,
     pub kind: AttributeKind,
+    pub close_bracket_token: Token,
 }
 
 #[derive(Debug)]

@@ -1,16 +1,16 @@
-#builtin("Unit")
+#[builtin("Unit")]
 struct Unit {}
 
-#builtin("Never")
+#[builtin("Never")]
 enum Never {}
 
-#builtin("I32")
+#[builtin("I32")]
 type I32
 
-#builtin("Runtime")
+#[builtin("Runtime")]
 type Runtime
 
-#builtin("Bool")
+#[builtin("Bool")]
 enum Bool {
     false: Unit,
     true: Unit,
@@ -41,7 +41,7 @@ fn main(runtime: Runtime) {
 }
 
 // below main to prove that out-of-order declarations work
-#builtin("print_i32")
+#[builtin("print_i32")]
 fn print_i32(value: I32, runtime: Runtime)
 
 fn random_testing() {
