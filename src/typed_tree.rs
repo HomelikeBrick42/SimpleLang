@@ -3,15 +3,14 @@ use crate::{
     interning::InternedStr,
     lexing::SourceLocation,
 };
-use rustc_hash::FxHashMap;
 
 #[derive(Debug)]
 pub struct Function {
     pub location: SourceLocation,
     pub name: InternedStr,
+    pub typ: Id<Type>,
     pub parameter_types: Box<[Id<Type>]>,
     pub return_type: Id<Type>,
-    pub typ: Id<Type>,
 }
 
 #[derive(Debug)]
@@ -19,7 +18,7 @@ pub enum FunctionBody {
     Builtin(BuiltinFunction),
     Body {
         variables: IdMap<Variable>,
-        parameters: Box<[Id<Variable>]>,
+        parameter_variables: Box<[Id<Variable>]>,
         expression: Box<Expression>,
     },
 }
@@ -34,58 +33,6 @@ pub struct Variable {
     pub location: SourceLocation,
     pub name: Option<InternedStr>,
     pub typ: Id<Type>,
-}
-
-#[derive(Debug)]
-pub struct Type {
-    pub location: SourceLocation,
-    pub kind: TypeKind,
-}
-
-#[derive(Debug)]
-pub enum TypeKind {
-    Resolved(Id<Type>),
-    Infer(Infer),
-    Struct {
-        name: InternedStr,
-        members: Box<[Member]>,
-    },
-    Enum {
-        name: InternedStr,
-        members: Box<[Member]>,
-    },
-    FunctionItem(Id<Function>),
-    I32,
-    Runtime,
-}
-
-#[derive(Debug)]
-pub enum Infer {
-    Anything,
-    FunctionLike {
-        parameters: Box<[Id<Type>]>,
-        return_type: Id<Type>,
-    },
-    StructLike {
-        members: FxHashMap<InternedStr, Id<Type>>,
-    },
-    NumberLike,
-}
-
-#[derive(Debug)]
-pub struct Member {
-    pub location: SourceLocation,
-    pub name: InternedStr,
-    pub typ: Id<Type>,
-}
-
-#[derive(Debug)]
-pub enum Statement {
-    Expression(Box<Expression>),
-    Assignment {
-        pattern: Box<Pattern>,
-        value: Box<Expression>,
-    },
 }
 
 #[derive(Debug)]
@@ -108,8 +55,11 @@ pub enum ExpressionKind {
         operand: Box<Expression>,
         arguments: Box<[Expression]>,
     },
-    Constructor {
-        arguments: Box<[ConstructorArgument]>,
+    StructConstructor {
+        arguments: Box<[StructConstructorArgument]>,
+    },
+    EnumConstructor {
+        arguments: Box<EnumConstructorArgument>,
     },
     Match {
         scruitnee: Box<Expression>,
@@ -126,24 +76,34 @@ pub enum ExpressionKind {
 
 #[derive(Debug)]
 pub enum Place {
-    Variable(Id<Variable>),
     Function(Id<Function>),
-    MemberAccess {
+    Variable(Id<Variable>),
+    StructMemberAccess {
         operand: Box<Expression>,
-        member_name: InternedStr,
+        member_index: usize,
+    },
+    EnumMemberAccess {
+        operand: Box<Expression>,
+        variant_index: usize,
     },
 }
 
 #[derive(Debug)]
 pub enum Constant {
-    Integer(u64),
+    I32(i32),
 }
 
-pub struct Label;
+#[derive(Debug)]
+pub struct StructConstructorArgument {
+    pub location: SourceLocation,
+    pub member_index: usize,
+    pub value: Expression,
+}
 
 #[derive(Debug)]
-pub struct ConstructorArgument {
-    pub name: InternedStr,
+pub struct EnumConstructorArgument {
+    pub location: SourceLocation,
+    pub variant_index: usize,
     pub value: Expression,
 }
 
@@ -152,6 +112,23 @@ pub struct MatchArm {
     pub location: SourceLocation,
     pub pattern: Pattern,
     pub value: Expression,
+}
+
+pub struct Label;
+
+#[derive(Debug)]
+pub struct Statement {
+    pub location: SourceLocation,
+    pub kind: StatementKind,
+}
+
+#[derive(Debug)]
+pub enum StatementKind {
+    Expression(Box<Expression>),
+    Assignment {
+        pattern: Box<Pattern>,
+        value: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]
@@ -163,11 +140,13 @@ pub struct Pattern {
 
 #[derive(Debug)]
 pub enum PatternKind {
-    Discard,
     Place(Place),
     Constant(Constant),
-    Deconstructor {
-        arguments: Box<[DeconstructorArgument]>,
+    StructDeconstructor {
+        arguments: Box<[StructDeconstructorArgument]>,
+    },
+    EnumDeconstructor {
+        arguments: Box<EnumDeconstructorArgument>,
     },
     Let {
         variable: Id<Variable>,
@@ -175,7 +154,43 @@ pub enum PatternKind {
 }
 
 #[derive(Debug)]
-pub struct DeconstructorArgument {
-    pub name: InternedStr,
+pub struct StructDeconstructorArgument {
+    pub location: SourceLocation,
+    pub member_index: usize,
     pub pattern: Pattern,
+}
+
+#[derive(Debug)]
+pub struct EnumDeconstructorArgument {
+    pub location: SourceLocation,
+    pub variant_index: usize,
+    pub pattern: Pattern,
+}
+
+#[derive(Debug)]
+pub struct Type {
+    pub location: SourceLocation,
+    pub kind: TypeKind,
+}
+
+#[derive(Debug)]
+pub enum TypeKind {
+    Struct {
+        name: InternedStr,
+        members: Box<[Member]>,
+    },
+    Enum {
+        name: InternedStr,
+        members: Box<[Member]>,
+    },
+    FunctionItem(Id<Function>),
+    I32,
+    Runtime,
+}
+
+#[derive(Debug)]
+pub struct Member {
+    pub location: SourceLocation,
+    pub name: InternedStr,
+    pub typ: Id<Type>,
 }

@@ -1,8 +1,10 @@
 use simple_lang::{
     ids::{Id, IdMap},
     inferred_tree as it,
-    inferring::{InferError, InferErrorKind, InferResult, infer_items},
+    inferring::{InferError, InferErrorKind, infer_items},
     parsing::parse_file,
+    type_check::{TypeCheckError, type_check},
+    typed_tree as tt,
     validating::validate_items,
 };
 
@@ -16,23 +18,28 @@ fn main() {
     let validated_items = validate_items(&syntax_items).unwrap_or_else(print_error_and_exit);
     drop(syntax_items);
 
-    let InferResult {
-        types,
-        functions,
-        function_bodies,
-        global_names,
-        errors,
-    } = infer_items(&validated_items);
+    let infer_result = infer_items(&validated_items);
     drop(validated_items);
-    if !errors.is_empty() {
-        print_infer_errors(&errors, &types, &functions);
-        std::process::exit(1)
+    if !infer_result.errors.is_empty() {
+        print_infer_errors(
+            &infer_result.errors,
+            &infer_result.types,
+            &infer_result.functions,
+        );
     }
 
-    println!("{types:#?}");
-    println!("{functions:#?}");
-    println!("{function_bodies:#?}");
-    println!("{global_names:#?}");
+    let type_check_result = type_check(&infer_result);
+    if !type_check_result.errors.is_empty() {
+        print_type_check_errors(
+            &type_check_result.errors,
+            &type_check_result.types,
+            &type_check_result.functions,
+        );
+    }
+
+    println!("{:#?}", type_check_result.types);
+    println!("{:#?}", type_check_result.functions);
+    println!("{:#?}", type_check_result.function_bodies);
 }
 
 fn print_error_and_exit<T: std::fmt::Display, U>(error: T) -> U {
@@ -44,7 +51,7 @@ fn print_infer_errors(
     errors: &[InferError],
     types: &IdMap<it::Type>,
     functions: &IdMap<it::Function>,
-) {
+) -> ! {
     for error in errors {
         eprint!("{}: ", error.location);
         match error.kind {
@@ -63,12 +70,12 @@ fn print_infer_errors(
             InferErrorKind::ExpectedTypeButGotType { expected, got } => {
                 eprintln!(
                     "Expected type {}, but got type {}",
-                    PrettyPrintType {
+                    PrettyPrintInferType {
                         typ: expected,
                         types,
                         functions,
                     },
-                    PrettyPrintType {
+                    PrettyPrintInferType {
                         typ: got,
                         types,
                         functions,
@@ -92,7 +99,7 @@ fn print_infer_errors(
             }
             InferErrorKind::UnableToInferType { typ } => eprintln!(
                 "Unable to infer type, only got as far as {}",
-                PrettyPrintType {
+                PrettyPrintInferType {
                     typ,
                     types,
                     functions,
@@ -100,15 +107,16 @@ fn print_infer_errors(
             ),
         }
     }
+    std::process::exit(1)
 }
 
-struct PrettyPrintType<'a> {
+struct PrettyPrintInferType<'a> {
     typ: Id<it::Type>,
     types: &'a IdMap<it::Type>,
     functions: &'a IdMap<it::Function>,
 }
 
-impl std::fmt::Display for PrettyPrintType<'_> {
+impl std::fmt::Display for PrettyPrintInferType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn print_type(
             typ: Id<it::Type>,
@@ -132,7 +140,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                             write!(
                                 f,
                                 "{}",
-                                PrettyPrintType {
+                                PrettyPrintInferType {
                                     typ: parameter,
                                     types,
                                     functions
@@ -142,7 +150,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                         write!(
                             f,
                             ") -> {}",
-                            PrettyPrintType {
+                            PrettyPrintInferType {
                                 typ: return_type,
                                 types,
                                 functions
@@ -158,7 +166,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                             write!(
                                 f,
                                 "{name}: {}",
-                                PrettyPrintType {
+                                PrettyPrintInferType {
                                     typ: member,
                                     types,
                                     functions
@@ -180,7 +188,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                         write!(
                             f,
                             "{}",
-                            PrettyPrintType {
+                            PrettyPrintInferType {
                                 typ: parameter,
                                 types,
                                 functions
@@ -190,7 +198,7 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                     write!(
                         f,
                         ") -> {} {{{}}}",
-                        PrettyPrintType {
+                        PrettyPrintInferType {
                             typ: functions[function].return_type,
                             types,
                             functions
@@ -205,4 +213,17 @@ impl std::fmt::Display for PrettyPrintType<'_> {
 
         print_type(self.typ, self.types, self.functions, f)
     }
+}
+
+fn print_type_check_errors(
+    errors: &[TypeCheckError],
+    #[expect(unused)] types: &IdMap<tt::Type>,
+    #[expect(unused)] functions: &IdMap<tt::Function>,
+) -> ! {
+    #[expect(clippy::never_loop)]
+    for error in errors {
+        eprintln!("{}: ", error.location);
+        match error.kind {}
+    }
+    std::process::exit(1)
 }

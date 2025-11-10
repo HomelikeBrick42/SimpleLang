@@ -238,6 +238,7 @@ impl<T, U: Debug> Debug for IdSecondaryMap<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IdSecondaryMap")
             .field("id_type", &core::any::type_name::<T>())
+            .field("value_type", &core::any::type_name::<U>())
             .field("items", &self.items)
             .finish()
     }
