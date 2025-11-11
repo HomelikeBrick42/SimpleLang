@@ -303,6 +303,28 @@ fn print_type_check_errors(
             TypeCheckErrorKind::PlaceMustBeReadable => eprintln!("Place must be readable"),
             TypeCheckErrorKind::PatternMustBeWritable => eprintln!("Pattern must be writable"),
             TypeCheckErrorKind::PatternMustBeConstant => eprintln!("Pattern must be constant"),
+            TypeCheckErrorKind::TypeHasInfiniteSize { typ } => {
+                eprintln!(
+                    "Type {} has infinite size",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Type was declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::TypeDoesNotHaveALayout { typ } => {
+                eprintln!(
+                    "Type {} does not have a layout",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Type was declared here", types[typ].location);
+            }
         }
     }
     std::process::exit(1)
