@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod control_flow_graph;
 pub mod ids;
 pub mod inferred_tree;
 pub mod inferring;

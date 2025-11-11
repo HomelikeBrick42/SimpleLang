@@ -248,6 +248,17 @@ fn print_type_check_errors(
                 );
                 eprintln!("{}: Got type declared here", types[typ].location);
             }
+            TypeCheckErrorKind::ExpectedStructButGot { typ } => {
+                eprintln!(
+                    "Expected struct type but got type {}",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Got type declared here", types[typ].location);
+            }
             TypeCheckErrorKind::UnknownMemberOnType { member_name, typ } => {
                 eprintln!(
                     "Unknown member '{member_name}' on type {}",

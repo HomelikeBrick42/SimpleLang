@@ -564,9 +564,9 @@ impl<'ast> Inferrer<'ast> {
                         ref pattern,
                         ref value,
                     } => {
-                        let pattern = Box::new(self.pattern(pattern, names, variables)?);
                         let value = Box::new(self.expression(value, names, variables)?);
-                        self.expect_types_equal(statement.location, pattern.typ, value.typ)?;
+                        let pattern = Box::new(self.pattern(pattern, names, variables)?);
+                        self.expect_types_equal(value.location, pattern.typ, value.typ)?;
                         Some(it::Statement {
                             location: statement.location,
                             kind: it::StatementKind::Assignment { pattern, value },
