@@ -106,6 +106,9 @@ fn print_infer_errors(
                     functions,
                 }
             ),
+            InferErrorKind::TypeInferenceCannotBeUsedHere => {
+                eprintln!("Type inference cannot be used here")
+            }
         }
     }
     std::process::exit(1)

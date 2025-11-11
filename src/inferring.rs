@@ -50,6 +50,7 @@ pub enum InferErrorKind {
     UnableToInferType {
         typ: Id<it::Type>,
     },
+    TypeInferenceCannotBeUsedHere,
 }
 
 #[derive(Debug)]
@@ -331,7 +332,7 @@ impl<'ast> Inferrer<'ast> {
                                 Ok(it::Member {
                                     location,
                                     name,
-                                    typ: self.typ(typ, names)?,
+                                    typ: self.typ(typ, names, false)?,
                                 })
                             },
                         )
@@ -390,7 +391,7 @@ impl<'ast> Inferrer<'ast> {
                                 Ok(it::Member {
                                     location,
                                     name,
-                                    typ: self.typ(typ, names)?,
+                                    typ: self.typ(typ, names, false)?,
                                 })
                             },
                         )
@@ -429,7 +430,7 @@ impl<'ast> Inferrer<'ast> {
             }
 
             ast::ItemKind::Type { name: _, ref typ } => {
-                let id = self.typ(typ, names)?;
+                let id = self.typ(typ, names, false)?;
                 ResolvedBinding {
                     location: item.location,
                     kind: ResolvedBindingKind::Type(id),
@@ -476,7 +477,7 @@ impl<'ast> Inferrer<'ast> {
                              name,
                              ref typ,
                          }| {
-                            let typ = self.typ(typ, names)?;
+                            let typ = self.typ(typ, names, false)?;
                             let variable = variables.insert(it::Variable {
                                 location,
                                 name: Some(name),
@@ -501,7 +502,7 @@ impl<'ast> Inferrer<'ast> {
                     )
                     .collect::<Result<Box<[_]>, _>>()?;
 
-                let return_type = self.typ(return_type, names)?;
+                let return_type = self.typ(return_type, names, false)?;
 
                 let id = self.functions.insert_with(|id| it::Function {
                     location: item.location,
@@ -674,7 +675,7 @@ impl<'ast> Inferrer<'ast> {
                 ref typ,
                 ref arguments,
             } => {
-                let typ = self.typ(typ, names)?;
+                let typ = self.typ(typ, names, true)?;
 
                 let mut initialised_members =
                     FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
@@ -911,12 +912,22 @@ impl<'ast> Inferrer<'ast> {
         &mut self,
         typ: &'ast ast::Type,
         names: &Names<'ast>,
+        infer_allowed: bool,
     ) -> Result<Id<it::Type>, InferError> {
         Ok(match typ.kind {
-            ast::TypeKind::Infer => self.types.insert(it::Type {
-                location: typ.location,
-                kind: it::TypeKind::Infer(it::Infer::Anything),
-            }),
+            ast::TypeKind::Infer => {
+                if infer_allowed {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::Infer(it::Infer::Anything),
+                    })
+                } else {
+                    return Err(InferError {
+                        location: typ.location,
+                        kind: InferErrorKind::TypeInferenceCannotBeUsedHere,
+                    });
+                }
+            }
 
             ast::TypeKind::Path(ref path) => match self.path(path, names)? {
                 ResolvedBinding {
@@ -1064,7 +1075,7 @@ impl<'ast> Inferrer<'ast> {
                 ref typ,
                 ref arguments,
             } => {
-                let typ = self.typ(typ, names)?;
+                let typ = self.typ(typ, names, true)?;
 
                 let mut initialised_members =
                     FxHashMap::<InternedStr, SourceLocation>::with_capacity_and_hasher(
@@ -1120,7 +1131,7 @@ impl<'ast> Inferrer<'ast> {
             }
 
             ast::PatternKind::Let { name, ref typ } => {
-                let typ = self.typ(typ, names)?;
+                let typ = self.typ(typ, names, true)?;
                 let variable = variables.insert(it::Variable {
                     location: pattern.location,
                     name: Some(name),
