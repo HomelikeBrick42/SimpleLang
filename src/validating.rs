@@ -198,9 +198,46 @@ pub fn validate_item(item: &st::Item) -> Result<ast::Item, SyntaxTreeValidationE
                     }
 
                     match builtin_name.as_str() {
+                        "U8" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::U8),
+                        },
+                        "U16" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::U16),
+                        },
+                        "U32" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::U32),
+                        },
+                        "U64" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::U64),
+                        },
+                        "I8" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::I8),
+                        },
+                        "I16" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::I16),
+                        },
                         "I32" => ast::Type {
                             location,
                             kind: ast::TypeKind::Builtin(ast::BuiltinType::I32),
+                        },
+                        "I64" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::I64),
+                        },
+
+                        "ISize" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::ISize),
+                        },
+                        "USize" => ast::Type {
+                            location,
+                            kind: ast::TypeKind::Builtin(ast::BuiltinType::USize),
                         },
 
                         "Runtime" => ast::Type {

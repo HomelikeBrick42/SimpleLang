@@ -4,8 +4,27 @@ struct Unit {}
 #[builtin("Never")]
 enum Never {}
 
+#[builtin("U8")]
+type U8
+#[builtin("U16")]
+type U16
+#[builtin("U32")]
+type U32
+#[builtin("U64")]
+type U64
+#[builtin("I8")]
+type I8
+#[builtin("I16")]
+type I16
 #[builtin("I32")]
 type I32
+#[builtin("I64")]
+type I64
+
+#[builtin("USize")]
+type USize
+#[builtin("ISize")]
+type ISize
 
 #[builtin("Runtime")]
 type Runtime
@@ -18,7 +37,7 @@ enum Bool {
 
 struct Foo {
     member: Unit,
-    member2: I32,
+    member2: I8,
 }
 
 fn main(runtime: Runtime) {

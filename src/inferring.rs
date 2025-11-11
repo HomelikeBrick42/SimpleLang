@@ -66,7 +66,16 @@ pub fn infer_items(items: &[ast::Item]) -> InferResult {
         functions: IdMap::new(),
         unit_type: None,
         never_type: None,
+        u8_type: None,
+        u16_type: None,
+        u32_type: None,
+        u64_type: None,
+        i8_type: None,
+        i16_type: None,
         i32_type: None,
+        i64_type: None,
+        isize_type: None,
+        usize_type: None,
         runtime_type: None,
         bool_type: None,
 
@@ -200,7 +209,16 @@ struct Inferrer<'ast> {
     functions: IdMap<it::Function>,
     unit_type: Option<Id<it::Type>>,
     never_type: Option<Id<it::Type>>,
+    u8_type: Option<Id<it::Type>>,
+    u16_type: Option<Id<it::Type>>,
+    u32_type: Option<Id<it::Type>>,
+    u64_type: Option<Id<it::Type>>,
+    i8_type: Option<Id<it::Type>>,
+    i16_type: Option<Id<it::Type>>,
     i32_type: Option<Id<it::Type>>,
+    i64_type: Option<Id<it::Type>>,
+    isize_type: Option<Id<it::Type>>,
+    usize_type: Option<Id<it::Type>>,
     runtime_type: Option<Id<it::Type>>,
     bool_type: Option<Id<it::Type>>,
 
@@ -931,10 +949,65 @@ impl<'ast> Inferrer<'ast> {
                     .never_type
                     .expect("Never type should have already been declared with #builtin"),
 
+                ast::BuiltinType::U8 => *self.u8_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::U8,
+                    })
+                }),
+                ast::BuiltinType::U16 => *self.u16_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::U16,
+                    })
+                }),
+                ast::BuiltinType::U32 => *self.u32_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::U32,
+                    })
+                }),
+                ast::BuiltinType::U64 => *self.u64_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::U64,
+                    })
+                }),
+                ast::BuiltinType::I8 => *self.i8_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::I8,
+                    })
+                }),
+                ast::BuiltinType::I16 => *self.i16_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::I16,
+                    })
+                }),
                 ast::BuiltinType::I32 => *self.i32_type.get_or_insert_with(|| {
                     self.types.insert(it::Type {
                         location: typ.location,
                         kind: it::TypeKind::I32,
+                    })
+                }),
+                ast::BuiltinType::I64 => *self.i64_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::I64,
+                    })
+                }),
+
+                ast::BuiltinType::ISize => *self.isize_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::ISize,
+                    })
+                }),
+                ast::BuiltinType::USize => *self.usize_type.get_or_insert_with(|| {
+                    self.types.insert(it::Type {
+                        location: typ.location,
+                        kind: it::TypeKind::USize,
                     })
                 }),
 
@@ -1141,17 +1214,35 @@ impl<'ast> Inferrer<'ast> {
                 }
 
                 (
-                    &it::TypeKind::Infer(it::Infer::NumberLike),
+                    &it::TypeKind::Infer(it::Infer::NumberLike)
+                    | &it::TypeKind::U8
+                    | &it::TypeKind::U16
+                    | &it::TypeKind::U32
+                    | &it::TypeKind::U64
+                    | &it::TypeKind::I8
+                    | &it::TypeKind::I16
+                    | &it::TypeKind::I32
+                    | &it::TypeKind::I64
+                    | &it::TypeKind::ISize
+                    | &it::TypeKind::USize,
                     &it::TypeKind::Infer(it::Infer::NumberLike),
                 ) => {
                     self.types[got].kind = it::TypeKind::Resolved(expected);
                     Ok(())
                 }
-                (&it::TypeKind::I32, &it::TypeKind::Infer(it::Infer::NumberLike)) => {
-                    self.types[got].kind = it::TypeKind::Resolved(expected);
-                    Ok(())
-                }
-                (&it::TypeKind::Infer(it::Infer::NumberLike), &it::TypeKind::I32) => {
+                (
+                    &it::TypeKind::Infer(it::Infer::NumberLike),
+                    &it::TypeKind::U8
+                    | &it::TypeKind::U16
+                    | &it::TypeKind::U32
+                    | &it::TypeKind::U64
+                    | &it::TypeKind::I8
+                    | &it::TypeKind::I16
+                    | &it::TypeKind::I32
+                    | &it::TypeKind::I64
+                    | &it::TypeKind::ISize
+                    | &it::TypeKind::USize,
+                ) => {
                     self.types[expected].kind = it::TypeKind::Resolved(got);
                     Ok(())
                 }

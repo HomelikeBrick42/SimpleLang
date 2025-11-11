@@ -274,10 +274,47 @@ impl TypeChecker<'_> {
                 id
             }
 
+            it::TypeKind::U8 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::U8,
+            }),
+            it::TypeKind::U16 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::U16,
+            }),
+            it::TypeKind::U32 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::U32,
+            }),
+            it::TypeKind::U64 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::U64,
+            }),
+            it::TypeKind::I8 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::I8,
+            }),
+            it::TypeKind::I16 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::I16,
+            }),
             it::TypeKind::I32 => self.types.insert(tt::Type {
                 location: infer_type.location,
                 kind: tt::TypeKind::I32,
             }),
+            it::TypeKind::I64 => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::I64,
+            }),
+            it::TypeKind::ISize => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::ISize,
+            }),
+            it::TypeKind::USize => self.types.insert(tt::Type {
+                location: infer_type.location,
+                kind: tt::TypeKind::USize,
+            }),
+
             it::TypeKind::Runtime => self.types.insert(tt::Type {
                 location: infer_type.location,
                 kind: tt::TypeKind::Runtime,
@@ -446,7 +483,16 @@ impl TypeChecker<'_> {
 
                     tt::TypeKind::Opaque { .. }
                     | tt::TypeKind::FunctionItem(_)
+                    | tt::TypeKind::U8
+                    | tt::TypeKind::U16
+                    | tt::TypeKind::U32
+                    | tt::TypeKind::U64
+                    | tt::TypeKind::I8
+                    | tt::TypeKind::I16
                     | tt::TypeKind::I32
+                    | tt::TypeKind::I64
+                    | tt::TypeKind::ISize
+                    | tt::TypeKind::USize
                     | tt::TypeKind::Runtime => {
                         return Err(TypeCheckError {
                             location: expression.location,
@@ -553,7 +599,16 @@ impl TypeChecker<'_> {
 
                     tt::TypeKind::Opaque { .. }
                     | tt::TypeKind::FunctionItem(_)
+                    | tt::TypeKind::U8
+                    | tt::TypeKind::U16
+                    | tt::TypeKind::U32
+                    | tt::TypeKind::U64
+                    | tt::TypeKind::I8
+                    | tt::TypeKind::I16
                     | tt::TypeKind::I32
+                    | tt::TypeKind::I64
+                    | tt::TypeKind::ISize
+                    | tt::TypeKind::USize
                     | tt::TypeKind::Runtime => {
                         return Err(TypeCheckError {
                             location,
@@ -571,17 +626,30 @@ impl TypeChecker<'_> {
         typ: Id<tt::Type>,
         constant: &it::Constant,
     ) -> Result<tt::Constant, TypeCheckError> {
+        macro_rules! integer {
+            ($value:ident, $integer:ident, $variant:ident $(, $($signed:tt)*)?) => {{
+                if $value $($($signed)*)? < $integer::MIN as _ || $value $($($signed)*)? > $integer::MAX as _ {
+                    return Err(TypeCheckError {
+                        location,
+                        kind: TypeCheckErrorKind::IntegerOutOfRangeForType { value: $value, typ },
+                    });
+                }
+                tt::Constant::$variant($integer::try_from($value).unwrap())
+            }};
+        }
+
         Ok(match *constant {
             it::Constant::Integer(value) => match self.types[typ].kind {
-                tt::TypeKind::I32 => {
-                    if value.cast_signed() < i32::MIN as _ || value.cast_signed() > i32::MAX as _ {
-                        return Err(TypeCheckError {
-                            location,
-                            kind: TypeCheckErrorKind::IntegerOutOfRangeForType { value, typ },
-                        });
-                    }
-                    tt::Constant::I32(value.try_into().unwrap())
-                }
+                tt::TypeKind::U8 => integer!(value, u8, U8),
+                tt::TypeKind::U16 => integer!(value, u16, U16),
+                tt::TypeKind::U32 => integer!(value, u32, U32),
+                tt::TypeKind::U64 => integer!(value, u64, U64),
+                tt::TypeKind::I8 => integer!(value, i8, I8, .cast_signed()),
+                tt::TypeKind::I16 => integer!(value, i16, I16, .cast_signed()),
+                tt::TypeKind::I32 => integer!(value, i32, I32, .cast_signed()),
+                tt::TypeKind::I64 => integer!(value, i64, I64, .cast_signed()),
+                tt::TypeKind::ISize => integer!(value, isize, ISize, .cast_signed()),
+                tt::TypeKind::USize => integer!(value, usize, USize),
 
                 tt::TypeKind::Opaque { .. }
                 | tt::TypeKind::Struct { .. }
@@ -722,7 +790,16 @@ impl TypeChecker<'_> {
 
                     tt::TypeKind::Opaque { .. }
                     | tt::TypeKind::FunctionItem(_)
+                    | tt::TypeKind::U8
+                    | tt::TypeKind::U16
+                    | tt::TypeKind::U32
+                    | tt::TypeKind::U64
+                    | tt::TypeKind::I8
+                    | tt::TypeKind::I16
                     | tt::TypeKind::I32
+                    | tt::TypeKind::I64
+                    | tt::TypeKind::ISize
+                    | tt::TypeKind::USize
                     | tt::TypeKind::Runtime => {
                         return Err(TypeCheckError {
                             location: pattern.location,

@@ -208,7 +208,16 @@ impl std::fmt::Display for PrettyPrintInferType<'_> {
                         functions[function].name
                     )
                 }
+                it::TypeKind::U8 => write!(f, "U8"),
+                it::TypeKind::U16 => write!(f, "U16"),
+                it::TypeKind::U32 => write!(f, "U32"),
+                it::TypeKind::U64 => write!(f, "U64"),
+                it::TypeKind::I8 => write!(f, "I8"),
+                it::TypeKind::I16 => write!(f, "I16"),
                 it::TypeKind::I32 => write!(f, "I32"),
+                it::TypeKind::I64 => write!(f, "I64"),
+                it::TypeKind::ISize => write!(f, "ISize"),
+                it::TypeKind::USize => write!(f, "USize"),
                 it::TypeKind::Runtime => write!(f, "Runtime"),
             }
         }
@@ -223,7 +232,7 @@ fn print_type_check_errors(
     functions: &IdMap<tt::Function>,
 ) -> ! {
     for error in errors {
-        eprintln!("{}: ", error.location);
+        eprint!("{}: ", error.location);
         match error.kind {
             TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ } => {
                 eprintln!(
@@ -341,7 +350,16 @@ impl std::fmt::Display for PrettyPrintType<'_> {
                         functions[function].name
                     )
                 }
+                tt::TypeKind::U8 => write!(f, "U8"),
+                tt::TypeKind::U16 => write!(f, "U16"),
+                tt::TypeKind::U32 => write!(f, "U32"),
+                tt::TypeKind::U64 => write!(f, "U64"),
+                tt::TypeKind::I8 => write!(f, "I8"),
+                tt::TypeKind::I16 => write!(f, "I16"),
                 tt::TypeKind::I32 => write!(f, "I32"),
+                tt::TypeKind::I64 => write!(f, "I64"),
+                tt::TypeKind::ISize => write!(f, "ISize"),
+                tt::TypeKind::USize => write!(f, "USize"),
                 tt::TypeKind::Runtime => write!(f, "Runtime"),
             }
         }
