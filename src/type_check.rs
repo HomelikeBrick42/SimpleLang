@@ -1,7 +1,3 @@
-use std::num::NonZeroUsize;
-
-use rustc_hash::FxHashMap;
-
 use crate::{
     ids::{Id, IdMap, IdSecondaryMap},
     inferred_tree as it,
@@ -10,6 +6,7 @@ use crate::{
     lexing::SourceLocation,
     typed_tree as tt,
 };
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone)]
 pub struct TypeCheckError {
@@ -47,12 +44,6 @@ pub enum TypeCheckErrorKind {
     PlaceMustBeReadable,
     PatternMustBeWritable,
     PatternMustBeConstant,
-    TypeHasInfiniteSize {
-        typ: Id<tt::Type>,
-    },
-    TypeDoesNotHaveALayout {
-        typ: Id<tt::Type>,
-    },
 }
 
 pub struct TypeCheckResult {
@@ -80,15 +71,6 @@ pub fn type_check(infer_result: &InferResult) -> TypeCheckResult {
 
     for (typ, _) in infer_result.types.iter() {
         checker.typ(typ);
-    }
-
-    for typ in checker.types.iter().map(|(id, _)| id).collect::<Vec<_>>() {
-        match get_type_layout(typ, &checker.types, &mut IdSecondaryMap::new()) {
-            Ok(layout) => checker.types[typ].layout = layout,
-            Err(error) => {
-                errors.push(error);
-            }
-        }
     }
 
     for (function, _) in infer_result.functions.iter() {
@@ -145,13 +127,6 @@ pub fn type_check(infer_result: &InferResult) -> TypeCheckResult {
                         let variable = variables.insert(tt::Variable {
                             location,
                             name,
-                            layout: match checker.types[typ].layout {
-                                Some(layout) => layout,
-                                None => {
-                                    errors.push(TypeCheckError { location, kind: TypeCheckErrorKind::TypeDoesNotHaveALayout { typ } });
-                                    continue 'function_loop;
-                                },
-                            },
                             typ,
                         });
                         checker
@@ -215,7 +190,6 @@ impl TypeChecker<'_> {
 
             it::TypeKind::Infer(_) => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::Opaque {
                     name: "{{error}}".into(),
                 },
@@ -223,14 +197,12 @@ impl TypeChecker<'_> {
 
             it::TypeKind::Opaque { name } => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::Opaque { name },
             }),
 
             it::TypeKind::Struct { name, ref members } => {
                 let id = self.types.insert(tt::Type {
                     location: infer_type.location,
-                    layout: None,
                     kind: tt::TypeKind::Opaque { name },
                 });
                 self.type_translations.insert(typ, id);
@@ -260,7 +232,6 @@ impl TypeChecker<'_> {
             it::TypeKind::Enum { name, ref members } => {
                 let id = self.types.insert(tt::Type {
                     location: infer_type.location,
-                    layout: None,
                     kind: tt::TypeKind::Opaque { name },
                 });
                 self.type_translations.insert(typ, id);
@@ -290,7 +261,6 @@ impl TypeChecker<'_> {
             it::TypeKind::FunctionItem(function) => {
                 let id = self.types.insert(tt::Type {
                     location: infer_type.location,
-                    layout: None,
                     kind: tt::TypeKind::Opaque {
                         name: self.infer_functions[function].name,
                     },
@@ -306,58 +276,47 @@ impl TypeChecker<'_> {
 
             it::TypeKind::U8 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::U8,
             }),
             it::TypeKind::U16 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::U16,
             }),
             it::TypeKind::U32 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::U32,
             }),
             it::TypeKind::U64 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::U64,
             }),
             it::TypeKind::I8 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::I8,
             }),
             it::TypeKind::I16 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::I16,
             }),
             it::TypeKind::I32 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::I32,
             }),
             it::TypeKind::I64 => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::I64,
             }),
             it::TypeKind::ISize => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::ISize,
             }),
             it::TypeKind::USize => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::USize,
             }),
 
             it::TypeKind::Runtime => self.types.insert(tt::Type {
                 location: infer_type.location,
-                layout: None,
                 kind: tt::TypeKind::Runtime,
             }),
         };
@@ -936,94 +895,6 @@ fn check_pattern_constant(pattern: &tt::Pattern) -> Result<(), TypeCheckError> {
         Err(TypeCheckError {
             location: pattern.location,
             kind: TypeCheckErrorKind::PatternMustBeConstant,
-        })
-    }
-}
-
-fn get_type_layout(
-    typ: Id<tt::Type>,
-    types: &IdMap<tt::Type>,
-    seen_types: &mut IdSecondaryMap<tt::Type, ()>,
-) -> Result<Option<tt::Layout>, TypeCheckError> {
-    let location = types[typ].location;
-    if seen_types.insert(typ, ()).is_none() {
-        Ok(Some(match types[typ].kind {
-            tt::TypeKind::Opaque { name: _ } => {
-                return Ok(None);
-            }
-            tt::TypeKind::Struct {
-                name: _,
-                ref members,
-            } => {
-                return members
-                    .iter()
-                    .map(|member| get_type_layout(member.typ, types, &mut seen_types.clone()))
-                    .sum();
-            }
-            tt::TypeKind::Enum {
-                name: _,
-                ref members,
-            } => {
-                let discrminant_layout = match members.len() {
-                    ..=0xFF => tt::Layout {
-                        align: const { NonZeroUsize::new(align_of::<u8>()).unwrap() },
-                        size: size_of::<u8>(),
-                    },
-                    0x100..=0xFFFF => tt::Layout {
-                        align: const { NonZeroUsize::new(align_of::<u16>()).unwrap() },
-                        size: size_of::<u16>(),
-                    },
-                    0x10000..=0xFFFFFFFF => tt::Layout {
-                        align: const { NonZeroUsize::new(align_of::<u32>()).unwrap() },
-                        size: size_of::<u32>(),
-                    },
-                    0x100000000..=0xFFFFFFFFFFFFFFFF => tt::Layout {
-                        align: const { NonZeroUsize::new(align_of::<u64>()).unwrap() },
-                        size: size_of::<u64>(),
-                    },
-                    _ => panic!("Internal Compiler Error: unsupported number of enum variants"),
-                };
-                return std::iter::once(Ok(Some(discrminant_layout)))
-                    .chain(
-                        members.iter().map(|member| {
-                            get_type_layout(member.typ, types, &mut seen_types.clone())
-                        }),
-                    )
-                    .sum();
-            }
-            tt::TypeKind::FunctionItem(_) => tt::Layout {
-                align: NonZeroUsize::MIN,
-                size: 0,
-            },
-            tt::TypeKind::U8 | tt::TypeKind::I8 => tt::Layout {
-                align: const { NonZeroUsize::new(align_of::<u8>()).unwrap() },
-                size: size_of::<u8>(),
-            },
-            tt::TypeKind::U16 | tt::TypeKind::I16 => tt::Layout {
-                align: const { NonZeroUsize::new(align_of::<u16>()).unwrap() },
-                size: size_of::<u16>(),
-            },
-            tt::TypeKind::U32 | tt::TypeKind::I32 => tt::Layout {
-                align: const { NonZeroUsize::new(align_of::<u32>()).unwrap() },
-                size: size_of::<u32>(),
-            },
-            tt::TypeKind::U64 | tt::TypeKind::I64 => tt::Layout {
-                align: const { NonZeroUsize::new(align_of::<u64>()).unwrap() },
-                size: size_of::<u64>(),
-            },
-            tt::TypeKind::ISize | tt::TypeKind::USize => tt::Layout {
-                align: const { NonZeroUsize::new(align_of::<usize>()).unwrap() },
-                size: size_of::<usize>(),
-            },
-            tt::TypeKind::Runtime => tt::Layout {
-                align: NonZeroUsize::MIN,
-                size: 0,
-            },
-        }))
-    } else {
-        Err(TypeCheckError {
-            location,
-            kind: TypeCheckErrorKind::TypeHasInfiniteSize { typ },
         })
     }
 }

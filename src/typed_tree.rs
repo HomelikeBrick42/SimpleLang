@@ -3,7 +3,6 @@ use crate::{
     interning::InternedStr,
     lexing::SourceLocation,
 };
-use std::num::NonZeroUsize;
 
 #[derive(Debug)]
 pub struct Function {
@@ -32,7 +31,6 @@ pub enum BuiltinFunction {
 pub struct Variable {
     pub location: SourceLocation,
     pub name: Option<InternedStr>,
-    pub layout: Layout,
     pub typ: Id<Type>,
 }
 
@@ -178,39 +176,9 @@ pub struct EnumDeconstructorArgument {
     pub pattern: Pattern,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Layout {
-    pub align: NonZeroUsize,
-    pub size: usize,
-}
-
-impl std::iter::Sum for Layout {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        let layout = iter.fold(
-            Layout {
-                align: NonZeroUsize::MIN,
-                size: 0,
-            },
-            |layout, new_layout| Layout {
-                align: layout.align.max(new_layout.align),
-                size: layout
-                    .size
-                    .next_multiple_of(new_layout.align.get())
-                    .checked_add(new_layout.size)
-                    .expect("Internal Compiler Error: type size overflowed usize"),
-            },
-        );
-        Layout {
-            align: layout.align,
-            size: layout.size.next_multiple_of(layout.align.get()),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Type {
     pub location: SourceLocation,
-    pub layout: Option<Layout>,
     pub kind: TypeKind,
 }
 
