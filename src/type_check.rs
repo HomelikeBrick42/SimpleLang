@@ -19,6 +19,9 @@ pub enum TypeCheckErrorKind {
     ExpectedStructOrEnumButGot {
         typ: Id<tt::Type>,
     },
+    ExpectedStructButGot {
+        typ: Id<tt::Type>,
+    },
     UnknownMemberOnType {
         member_name: InternedStr,
         typ: Id<tt::Type>,
@@ -580,24 +583,7 @@ impl TypeChecker<'_> {
                         }
                     }
 
-                    tt::TypeKind::Enum {
-                        name: _,
-                        ref members,
-                    } => {
-                        let variant_index = members
-                            .iter()
-                            .position(|member| member.name == member_name)
-                            .ok_or(TypeCheckError {
-                                location,
-                                kind: TypeCheckErrorKind::UnknownMemberOnType { member_name, typ },
-                            })?;
-                        tt::Place::EnumMemberAccess {
-                            operand,
-                            variant_index,
-                        }
-                    }
-
-                    tt::TypeKind::Opaque { .. }
+                    tt::TypeKind::Opaque { .. } | tt::TypeKind::Enum { .. }
                     | tt::TypeKind::FunctionItem(_)
                     | tt::TypeKind::U8
                     | tt::TypeKind::U16
@@ -612,7 +598,7 @@ impl TypeChecker<'_> {
                     | tt::TypeKind::Runtime => {
                         return Err(TypeCheckError {
                             location,
-                            kind: TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ },
+                            kind: TypeCheckErrorKind::ExpectedStructButGot { typ },
                         });
                     }
                 }
@@ -821,7 +807,6 @@ fn check_place_readable(location: SourceLocation, place: &tt::Place) -> Result<(
         tt::Place::Function(_) => true,
         tt::Place::Variable(_) => true,
         tt::Place::StructMemberAccess { .. } => true,
-        tt::Place::EnumMemberAccess { .. } => false,
     };
     if readable {
         Ok(())
@@ -840,7 +825,6 @@ fn check_pattern_writable(pattern: &tt::Pattern) -> Result<(), TypeCheckError> {
             tt::Place::Function(_) => false,
             tt::Place::Variable(_) => true,
             tt::Place::StructMemberAccess { .. } => true,
-            tt::Place::EnumMemberAccess { .. } => false,
         },
         tt::PatternKind::Constant(_) => false,
         tt::PatternKind::StructDeconstructor { ref arguments } => {
@@ -872,10 +856,6 @@ fn check_pattern_constant(pattern: &tt::Pattern) -> Result<(), TypeCheckError> {
             tt::Place::StructMemberAccess {
                 operand: _,
                 member_index: _,
-            } => false,
-            tt::Place::EnumMemberAccess {
-                operand: _,
-                variant_index: _,
             } => false,
         },
         tt::PatternKind::Constant(_) => true,

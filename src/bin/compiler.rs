@@ -1,8 +1,9 @@
 use simple_lang::{
-    ids::{Id, IdMap},
+    ids::{Id, IdMap, IdSecondaryMap},
     inferred_tree as it,
     inferring::{InferError, InferErrorKind, infer_items},
     parsing::parse_file,
+    to_cfg,
     type_check::{TypeCheckError, TypeCheckErrorKind, type_check},
     typed_tree as tt,
     validating::validate_items,
@@ -38,9 +39,17 @@ fn main() {
         );
     }
 
+    let mut functions = IdSecondaryMap::new();
+    for (id, function) in type_check_result.functions.iter() {
+        let function_body = &type_check_result.function_bodies[id];
+        functions.insert(
+            id,
+            to_cfg::function(function, function_body, &type_check_result.types),
+        );
+    }
+
     println!("{:#?}", type_check_result.types);
-    println!("{:#?}", type_check_result.functions);
-    println!("{:#?}", type_check_result.function_bodies);
+    println!("{:#?}", functions);
 }
 
 fn print_error_and_exit<T: std::fmt::Display, U>(error: T) -> U {
@@ -240,6 +249,17 @@ fn print_type_check_errors(
             TypeCheckErrorKind::ExpectedStructOrEnumButGot { typ } => {
                 eprintln!(
                     "Expected struct or enum type but got type {}",
+                    PrettyPrintType {
+                        typ,
+                        types,
+                        functions
+                    }
+                );
+                eprintln!("{}: Got type declared here", types[typ].location);
+            }
+            TypeCheckErrorKind::ExpectedStructButGot { typ } => {
+                eprintln!(
+                    "Expected struct type but got type {}",
                     PrettyPrintType {
                         typ,
                         types,

@@ -81,10 +81,6 @@ pub enum Place {
         operand: Box<Expression>,
         member_index: usize,
     },
-    EnumMemberAccess {
-        operand: Box<Expression>,
-        variant_index: usize,
-    },
 }
 
 #[derive(Debug)]
