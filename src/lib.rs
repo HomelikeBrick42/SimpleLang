@@ -7,6 +7,7 @@ pub mod interning;
 pub mod lexing;
 pub mod parsing;
 pub mod syntax_tree;
+pub mod to_cfg;
 pub mod type_check;
 pub mod typed_tree;
 pub mod validating;

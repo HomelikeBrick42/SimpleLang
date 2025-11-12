@@ -5,20 +5,21 @@ use crate::{
 };
 use std::{num::NonZeroUsize, sync::Arc};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Byte {
     Uninit,
     Init(u8),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Allocation {
     pub align: NonZeroUsize,
     pub bytes: Box<[Byte]>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
+    pub name: Option<InternedStr>,
     pub variables: IdMap<Variable>,
     pub parameters: Box<[Id<Variable>]>,
     pub return_value: Id<Variable>,
@@ -26,41 +27,34 @@ pub struct Function {
     pub start_block: Id<Block>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub name: Option<InternedStr>,
     pub typ: Id<tt::Type>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub instructions: Vec<Instruction>,
     pub jump: Jump,
 }
 
-#[derive(Debug)]
-pub struct CopyOperand {
-    pub variable: Id<Variable>,
-    pub offset: usize,
-    pub size: usize,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Instruction {
     Const {
         destination: Id<Variable>,
         bytes: Arc<[Byte]>,
     },
     Copy {
-        source: CopyOperand,
-        destination: CopyOperand,
+        source: Id<Variable>,
+        destination: Id<Variable>,
     },
     PrintI32 {
         variable: Id<Variable>,
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Jump {
     Unreachable,
     Return,
@@ -70,13 +64,14 @@ pub enum Jump {
         arms: MatchArms,
     },
     Call {
-        function: Id<Function>,
+        operand: Id<Variable>,
         arguments: Box<[Id<Variable>]>,
+        result: Id<Variable>,
         return_to: Id<Block>,
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MatchArms {
     U8 {
         arms: Box<[MatchArm<u8>]>,
@@ -96,7 +91,7 @@ pub enum MatchArms {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MatchArm<T> {
     pub value: T,
     pub jump: Id<Block>,

@@ -35,11 +35,20 @@ enum Bool {
     true: Unit,
 }
 
+#[builtin("print_i32")]
+fn print_i32(value: I32, runtime: Runtime)
+
 struct Foo {
     member: Unit,
     member2: I8,
 }
 
+fn main(runtime: Runtime) {
+    print_i32(5, runtime)
+    print_i32(10, runtime)
+}
+
+/*
 fn main(runtime: Runtime) {
     print_i32(5, runtime)
     print_i32(10, runtime)
@@ -58,10 +67,6 @@ fn main(runtime: Runtime) {
 
     foo.member
 }
-
-// below main to prove that out-of-order declarations work
-#[builtin("print_i32")]
-fn print_i32(value: I32, runtime: Runtime)
 
 fn random_testing() {
     // recursive functions work
@@ -121,3 +126,4 @@ fn random_testing() {
         while cond {}
     }
 }
+*/
